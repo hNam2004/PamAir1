@@ -23,7 +23,7 @@ const char *mqtt_topic = "esp32/test11";
 
 // Khai báo UART2 cho RS485
 HardwareSerial RS485Serial(2);
-SoftwareSerial gpsSerial(2, 3);
+HardwareSerial gpsSerial(1);
 TinyGPSPlus gps;
 // Cấu trúc dữ liệu cảm biến nhận từ RS485
 struct SensorData
@@ -301,7 +301,7 @@ void setup()
     // Khởi tạo RS485
     pinMode(RE_DE, OUTPUT);
     digitalWrite(RE_DE, LOW);                        // Mặc định là chế độ nhận
-    RS485Serial.begin(9600, SERIAL_8N1, RXD2, TXD2); // UART2
+    RS485Serial.begin(9600, SERIAL_8N1, 24, 26); // UART2
     Serial.println("RS485 da khoi tao");
 
     Serial.println("Cam bien HDC1080 nhan du lieu qua RS485");

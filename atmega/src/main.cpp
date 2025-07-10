@@ -1,16 +1,18 @@
 #include <Arduino.h>
 #include <SoftwareSerial.h>
-
-// TinyRTOS includes
-#include <TinyRTOS.h>
+#include <Wire.h>
+#include "Adafruit_HDC1000.h"
 
 // Chân cho ATmega328P
-#define RXD2 13  // RO từ MAX485 (Digital Pin 13)
-#define TXD2 17  // DI đến MAX485 (Digital Pin 17)
-#define RE_DE 23 // Điều khiển gửi / nhận (Digital Pin 23)
+#define RXD2 13
+#define TXD2 17
+#define RE_DE 23
 
 // Khai báo SoftwareSerial cho RS485
 SoftwareSerial RS485Serial(RXD2, TXD2);
+
+// Khai báo đối tượng HDC1000
+Adafruit_HDC1000 hdc = Adafruit_HDC1000();
 
 // Cấu trúc dữ liệu cảm biến
 struct SensorData
@@ -20,42 +22,51 @@ struct SensorData
     bool dataValid;
 };
 
-// Biến chia sẻ dữ liệu giữa các task
+// Biến chia sẻ dữ liệu giữa các nhiệm vụ
 volatile SensorData sharedSensorData;
 volatile bool newDataAvailable = false;
 
-// Hàm mô phỏng dữ liệu HDC1000
+// Thời gian kiểm tra nhiệm vụ
+unsigned long previousTask1Millis = 0;
+unsigned long previousTask2Millis = 0;
+const unsigned long task1Interval = 2000; // 2 giây
+const unsigned long task2Interval = 1000; // 1 giây
+
+// Hàm đọc dữ liệu thực từ HDC1000
 float getHDC1000Temperature()
 {
-    static float temp = 25.0;
-    temp += (random(-10, 11) / 10.0);
-    if (temp < 20.0) temp = 20.0;
-    if (temp > 35.0) temp = 35.0;
+    float temp = hdc.readTemperature();
+    if (isnan(temp) || temp < -40 || temp > 125)
+    {
+        Serial.println("Loi doc nhiet do HDC1000!");
+        return -999;
+    }
     return temp;
 }
 
 float getHDC1000Humidity()
 {
-    static float hum = 60.0;
-    hum += (random(-20, 21) / 10.0);
-    if (hum < 40.0) hum = 40.0;
-    if (hum > 80.0) hum = 80.0;
+    float hum = hdc.readHumidity();
+    if (isnan(hum) || hum < 0 || hum > 100)
+    {
+        Serial.println("Loi doc do am HDC1000!");
+        return -999;
+    }
     return hum;
 }
 
-// Hàm gửi dữ liệu qua RS485
+// Gửi dữ liệu qua RS485
 void sendRS485Data(String data)
 {
-    digitalWrite(RE_DE, HIGH); // Chuyển sang chế độ gửi
+    digitalWrite(RE_DE, HIGH);
     delay(1);
-    
     RS485Serial.print(data);
     RS485Serial.flush();
-    
     delay(1);
+    digitalWrite(RE_DE, LOW); // quay lại chế độ nhận
 }
 
-// Task 1: Đọc cảm biến và gửi RS485
+// Nhiệm vụ 1: đọc cảm biến và gửi RS485
 void task1Function()
 {
     float temperature = getHDC1000Temperature();
@@ -64,13 +75,11 @@ void task1Function()
     if (temperature != -999 && humidity != -999)
     {
         String dataString = "TEMP:" + String(temperature, 2) + ",HUM:" + String(humidity, 2);
-        
         sendRS485Data(dataString);
-        
+
         Serial.print("Da gui qua RS485: ");
         Serial.println(dataString);
 
-        // Lưu dữ liệu vào biến chia sẻ
         noInterrupts();
         sharedSensorData.temperature = temperature;
         sharedSensorData.humidity = humidity;
@@ -84,15 +93,16 @@ void task1Function()
     }
 }
 
-// Task 2: Hiển thị dữ liệu
+// Nhiệm vụ 2: hiển thị dữ liệu
 void task2Function()
 {
     if (newDataAvailable)
     {
         SensorData localData;
-        
         noInterrupts();
-        localData = sharedSensorData;
+        localData.temperature = sharedSensorData.temperature;
+        localData.humidity = sharedSensorData.humidity;
+        localData.dataValid = sharedSensorData.dataValid;
         newDataAvailable = false;
         interrupts();
 
@@ -110,32 +120,38 @@ void task2Function()
 void setup()
 {
     Serial.begin(9600);
-    
-    randomSeed(analogRead(0));
+
+    Wire.begin();
+    if (!hdc.begin())
+    {
+        Serial.println("Khong tim thay HDC1000!");
+        while (1)
+            ;
+    }
 
     pinMode(RE_DE, OUTPUT);
     digitalWrite(RE_DE, LOW);
     RS485Serial.begin(9600);
-    Serial.println("RS485 da khoi tao");
 
     Serial.println("Cam bien HDC1000 gui du lieu qua RS485");
-    Serial.println("ATmega328P with TinyRTOS ready!");
-
-    // Khởi tạo TinyRTOS
-    TinyRTOS_Init();
-    
-    // Tạo tasks với TinyRTOS
-    TinyRTOS_CreateTask(task1Function, 2000); // Task 1 chạy mỗi 2 giây
-    TinyRTOS_CreateTask(task2Function, 1000); // Task 2 chạy mỗi 1 giây
-    
-    Serial.println("TinyRTOS tasks created!");
-    
-    // Bắt đầu scheduler
-    TinyRTOS_Start();
+    Serial.println("ATmega328P khong dung RTOS, dung millis() de tao task logic.");
 }
 
 void loop()
 {
-    // TinyRTOS scheduler sẽ quản lý
-    TinyRTOS_Schedule();
+    unsigned long currentMillis = millis();
+
+    // Kiểm tra nếu đến thời gian thực hiện task1
+    if (currentMillis - previousTask1Millis >= task1Interval)
+    {
+        previousTask1Millis = currentMillis;
+        task1Function();
+    }
+
+    // Kiểm tra nếu đến thời gian thực hiện task2
+    if (currentMillis - previousTask2Millis >= task2Interval)
+    {
+        previousTask2Millis = currentMillis;
+        task2Function();
+    }
 }

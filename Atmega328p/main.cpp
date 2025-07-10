@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include <SoftwareSerial.h>
+#include <Wire.h>
+#include "Adafruit_HDC1000.h"
 
 // TinyRTOS includes
 #include <TinyRTOS.h>
@@ -11,6 +13,9 @@
 
 // Khai báo SoftwareSerial cho RS485
 SoftwareSerial RS485Serial(RXD2, TXD2);
+
+// Khai báo đối tượng HDC1000
+Adafruit_HDC1000 hdc = Adafruit_HDC1000();
 
 // Cấu trúc dữ liệu cảm biến
 struct SensorData
@@ -24,22 +29,32 @@ struct SensorData
 volatile SensorData sharedSensorData;
 volatile bool newDataAvailable = false;
 
-// Hàm mô phỏng dữ liệu HDC1000
+// Hàm đọc dữ liệu thực từ HDC1000
 float getHDC1000Temperature()
 {
-    static float temp = 25.0;
-    temp += (random(-10, 11) / 10.0);
-    if (temp < 20.0) temp = 20.0;
-    if (temp > 35.0) temp = 35.0;
+    float temp = hdc.readTemperature();
+
+    // Kiểm tra dữ liệu hợp lệ
+    if (isnan(temp) || temp < -40 || temp > 125)
+    {
+        Serial.println("Loi doc nhiet do HDC1000!");
+        return -999; // Trả về giá trị lỗi
+    }
+
     return temp;
 }
 
 float getHDC1000Humidity()
 {
-    static float hum = 60.0;
-    hum += (random(-20, 21) / 10.0);
-    if (hum < 40.0) hum = 40.0;
-    if (hum > 80.0) hum = 80.0;
+    float hum = hdc.readHumidity();
+
+    // Kiểm tra dữ liệu hợp lệ
+    if (isnan(hum) || hum < 0 || hum > 100)
+    {
+        Serial.println("Loi doc do am HDC1000!");
+        return -999; // Trả về giá trị lỗi
+    }
+
     return hum;
 }
 
@@ -48,10 +63,10 @@ void sendRS485Data(String data)
 {
     digitalWrite(RE_DE, HIGH); // Chuyển sang chế độ gửi
     delay(1);
-    
+
     RS485Serial.print(data);
     RS485Serial.flush();
-    
+
     delay(1);
 }
 
@@ -64,9 +79,9 @@ void task1Function()
     if (temperature != -999 && humidity != -999)
     {
         String dataString = "TEMP:" + String(temperature, 2) + ",HUM:" + String(humidity, 2);
-        
+
         sendRS485Data(dataString);
-        
+
         Serial.print("Da gui qua RS485: ");
         Serial.println(dataString);
 
@@ -90,7 +105,7 @@ void task2Function()
     if (newDataAvailable)
     {
         SensorData localData;
-        
+
         noInterrupts();
         localData = sharedSensorData;
         newDataAvailable = false;
@@ -110,9 +125,19 @@ void task2Function()
 void setup()
 {
     Serial.begin(9600);
-    
-    randomSeed(analogRead(0));
 
+    // Khởi tạo I2C và HDC1000
+    Wire.begin();
+    if (!hdc.begin())
+    {
+        Serial.println("Khong tim thay HDC1000!");
+        Serial.println("Kiem tra ket noi I2C...");
+        while (1)
+            ; // Dừng chương trình nếu không tìm thấy HDC1000
+    }
+    Serial.println("HDC1000 da khoi tao thanh cong!");
+
+    // Khởi tạo RS485
     pinMode(RE_DE, OUTPUT);
     digitalWrite(RE_DE, LOW);
     RS485Serial.begin(9600);
@@ -123,13 +148,13 @@ void setup()
 
     // Khởi tạo TinyRTOS
     TinyRTOS_Init();
-    
+
     // Tạo tasks với TinyRTOS
     TinyRTOS_CreateTask(task1Function, 2000); // Task 1 chạy mỗi 2 giây
     TinyRTOS_CreateTask(task2Function, 1000); // Task 2 chạy mỗi 1 giây
-    
+
     Serial.println("TinyRTOS tasks created!");
-    
+
     // Bắt đầu scheduler
     TinyRTOS_Start();
 }

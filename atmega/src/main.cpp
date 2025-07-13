@@ -1,15 +1,21 @@
 #include <Arduino.h>
 #include <SoftwareSerial.h>
-#include <Wire.h>
-#include <sps30.h>
+#include "sps30.h"
 
-// Chân cho ATmega328P (sửa lại cho phù hợp)
-#define RXD2 2
-#define TXD2 3
-#define RE_DE 4
+// Chân cho Max485
+#define RXD2 14  // RS485 RX
+#define TXD2 15  // RS485 TX
+#define RE_DE 12 // RS485 Direction Control
 
-// Khai báo SoftwareSerial cho RS485
+#define SPS30_RX 30 // SPS30 UART RX (ATmega328P TX)
+#define SPS30_TX 31 // SPS30 UART TX (ATmega328P RX)
+
+// Khai báo SoftwareSerial cho RS485 và SPS30
 SoftwareSerial RS485Serial(RXD2, TXD2);
+SoftwareSerial SPS30Serial(SPS30_TX, SPS30_RX); // RX, TX
+
+// Khai báo đối tượng SPS30 (sử dụng thư viện paulvha)
+SPS30 sps30;
 
 // Cấu trúc dữ liệu cảm biến SPS30
 struct SPS30Data
@@ -41,69 +47,55 @@ const unsigned long task2Interval = 1000; // 1 giây
 #define SENSOR_ERROR_VALUE -999.0f
 #define RS485_DELAY_MS 2
 
-// Hàm đọc dữ liệu từ SPS30
+// Hàm đọc dữ liệu từ SPS30 (sử dụng thư viện paulvha)
 bool getSPS30Data(SPS30Data *data)
 {
-    struct sps30_measurement m;
-    uint16_t data_ready;
-    int16_t ret;
+    struct sps_values val;
+    uint8_t ret;
 
-    // Kiểm tra dữ liệu có sẵn không
-    ret = sps30_read_data_ready(&data_ready);
-    if (ret < 0 || !data_ready)
+    // Đọc dữ liệu từ SPS30
+    ret = sps30.GetValues(&val);
+    if (ret != SPS30_ERR_OK)
     {
-        return false;
-    }
-
-    // Đọc dữ liệu đo
-    ret = sps30_read_measurement(&m);
-    if (ret < 0)
-    {
-        Serial.println("Loi doc du lieu SPS30!");
+        Serial.print("Loi doc du lieu SPS30: ");
+        Serial.println(ret);
         return false;
     }
 
     // Kiểm tra tính hợp lệ của dữ liệu
-    if (isnan(m.mc_1p0) || isnan(m.mc_2p5) || isnan(m.mc_4p0) || isnan(m.mc_10p0))
+    if (isnan(val.MassPM1) || isnan(val.MassPM2) || isnan(val.MassPM4) || isnan(val.MassPM10))
     {
         Serial.println("Du lieu SPS30 khong hop le!");
         return false;
     }
 
     // Sao chép dữ liệu
-    data->pm1_0 = m.mc_1p0;
-    data->pm2_5 = m.mc_2p5;
-    data->pm4_0 = m.mc_4p0;
-    data->pm10_0 = m.mc_10p0;
-
-#ifndef SPS30_LIMITED_I2C_BUFFER_SIZE
-    data->nc0_5 = m.nc_0p5;
-    data->nc1_0 = m.nc_1p0;
-    data->nc2_5 = m.nc_2p5;
-    data->nc4_0 = m.nc_4p0;
-    data->nc10_0 = m.nc_10p0;
-    data->typical_size = m.typical_particle_size;
-#else
-    // Nếu buffer hạn chế, đặt giá trị mặc định
-    data->nc0_5 = 0;
-    data->nc1_0 = 0;
-    data->nc2_5 = 0;
-    data->nc4_0 = 0;
-    data->nc10_0 = 0;
-    data->typical_size = 0;
-#endif
-
+    data->pm1_0 = val.MassPM1;
+    data->pm2_5 = val.MassPM2;
+    data->pm4_0 = val.MassPM4;
+    data->pm10_0 = val.MassPM10;
+    data->nc0_5 = val.NumPM0;
+    data->nc1_0 = val.NumPM1;
+    data->nc2_5 = val.NumPM2;
+    data->nc4_0 = val.NumPM4;
+    data->nc10_0 = val.NumPM10;
+    data->typical_size = val.PartSize;
     data->dataValid = true;
+
     return true;
 }
 
-// Gửi dữ liệu qua RS485
+// Gửi dữ liệu qua RS485 với định dạng chuẩn
 void sendRS485Data(String data)
 {
     digitalWrite(RE_DE, HIGH);
     delay(RS485_DELAY_MS);
-    RS485Serial.print(data);
+
+    // Thêm header và footer để đảm bảo tính toàn vẹn dữ liệu
+    String formattedData = "<SPS30>" + data + "</SPS30>\n";
+    RS485Serial.print(formattedData);
     RS485Serial.flush();
+
     delay(RS485_DELAY_MS);
     digitalWrite(RE_DE, LOW); // quay lại chế độ nhận
 }
@@ -115,19 +107,21 @@ void task1Function()
 
     if (getSPS30Data(&sensorData))
     {
-        // Tạo chuỗi dữ liệu để gửi qua RS485
-        String dataString = "PM1.0:" + String(sensorData.pm1_0, 2) +
-                            ",PM2.5:" + String(sensorData.pm2_5, 2) +
-                            ",PM4.0:" + String(sensorData.pm4_0, 2) +
-                            ",PM10:" + String(sensorData.pm10_0, 2);
+        // Tạo chuỗi dữ liệu theo định dạng chuẩn để gửi qua RS485
+        // Format: TYPE:SPS30,PM1:value,PM2.5:value,PM4:value,PM10:value[,NC0.5:value,NC1:value,NC2.5:value,NC4:value,NC10:value,SIZE:value]
+        String dataString = "TYPE:SPS30";
+        dataString += ",PM1:" + String(sensorData.pm1_0, 2);
+        dataString += ",PM2.5:" + String(sensorData.pm2_5, 2);
+        dataString += ",PM4:" + String(sensorData.pm4_0, 2);
+        dataString += ",PM10:" + String(sensorData.pm10_0, 2);
 
 #ifndef SPS30_LIMITED_I2C_BUFFER_SIZE
-        dataString += ",NC0.5:" + String(sensorData.nc0_5, 1) +
-                      ",NC1.0:" + String(sensorData.nc1_0, 1) +
-                      ",NC2.5:" + String(sensorData.nc2_5, 1) +
-                      ",NC4.0:" + String(sensorData.nc4_0, 1) +
-                      ",NC10:" + String(sensorData.nc10_0, 1) +
-                      ",SIZE:" + String(sensorData.typical_size, 2);
+        dataString += ",NC0.5:" + String(sensorData.nc0_5, 1);
+        dataString += ",NC1:" + String(sensorData.nc1_0, 1);
+        dataString += ",NC2.5:" + String(sensorData.nc2_5, 1);
+        dataString += ",NC4:" + String(sensorData.nc4_0, 1);
+        dataString += ",NC10:" + String(sensorData.nc10_0, 1);
+        dataString += ",SIZE:" + String(sensorData.typical_size, 2);
 #endif
 
         sendRS485Data(dataString);
@@ -229,32 +223,43 @@ void setup()
     digitalWrite(RE_DE, LOW);
     RS485Serial.begin(9600);
 
-    // Khởi tạo I2C và SPS30
-    sensirion_i2c_init();
+    // Khởi tạo UART cho SPS30
+    SPS30Serial.begin(115200); // SPS30 UART default baudrate
 
-    while (sps30_probe() != 0)
+    // Khởi tạo SPS30 với UART (sử dụng thư viện paulvha)
+    if (!sps30.begin(SERIALPORT2))
+    {
+        Serial.println("Khong the khoi tao SPS30 qua UART!");
+        while (1)
+            ;
+    }
+
+    // Cấu hình SPS30 để sử dụng SoftwareSerial
+    sps30.EnableDebugging(0); // Tắt debug
+
+    if (!sps30.probe())
     {
         Serial.println("SPS30 sensor probing failed!");
-        delay(500);
+        while (1)
+            ;
     }
 
     Serial.println("SPS30 sensor probing successful!");
 
     // Cấu hình auto cleaning (4 ngày)
-    int16_t ret = sps30_set_fan_auto_cleaning_interval_days(4);
-    if (ret)
+    uint8_t ret = sps30.SetAutoCleanInt(4 * 24 * 3600); // 4 ngày tính bằng giây
+    if (ret != SPS30_ERR_OK)
     {
         Serial.print("Loi cau hinh auto-clean interval: ");
         Serial.println(ret);
     }
 
     // Bắt đầu đo
-    ret = sps30_start_measurement();
-    if (ret < 0)
+    if (!sps30.start())
     {
         Serial.println("Loi bat dau do luong!");
         while (1)
-            ; // Dừng nếu không thể bắt đầu đo
+            ;
     }
 
     Serial.println("SPS30 bat dau do luong thanh cong!");

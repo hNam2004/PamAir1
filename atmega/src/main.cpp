@@ -1,159 +1,137 @@
 #include <Arduino.h>
-#include <SoftwareSerial.h>
 #include <Wire.h>
-#include <sps30.h>
+#include <SoftwareSerial.h>
 
-// Chân cho ATmega328P (sửa lại cho phù hợp)
-#define RXD2 2
-#define TXD2 3
-#define RE_DE 4
+// Chân điều khiển TX và Serial2 (SoftwareSerial)
+#define TX_PIN 15
+#define RX_PIN 14
+#define TX2_PIN 12
 
-// Khai báo SoftwareSerial cho RS485
-SoftwareSerial RS485Serial(RXD2, TXD2);
+// Tạo SoftwareSerial thay cho Serial2
+SoftwareSerial Serial2(RX_PIN, TX2_PIN);
 
-// Cấu trúc dữ liệu cảm biến SPS30
-struct SPS30Data
+// Cấu trúc dữ liệu cảm biến HDC1000
+struct HDC1000Data
 {
-    float pm1_0;        // PM1.0 [μg/m³]
-    float pm2_5;        // PM2.5 [μg/m³]
-    float pm4_0;        // PM4.0 [μg/m³]
-    float pm10_0;       // PM10.0 [μg/m³]
-    float nc0_5;        // Number concentration PM0.5 [#/cm³]
-    float nc1_0;        // Number concentration PM1.0 [#/cm³]
-    float nc2_5;        // Number concentration PM2.5 [#/cm³]
-    float nc4_0;        // Number concentration PM4.0 [#/cm³]
-    float nc10_0;       // Number concentration PM10.0 [#/cm³]
-    float typical_size; // Typical particle size [μm]
+    double temperature; // Nhiệt độ [°C]
+    double humidity;    // Độ ẩm [%]
     bool dataValid;
 };
 
 // Biến chia sẻ dữ liệu giữa các nhiệm vụ
-volatile SPS30Data sharedSensorData;
+volatile HDC1000Data sharedSensorData;
 volatile bool newDataAvailable = false;
 
 // Thời gian kiểm tra nhiệm vụ
 unsigned long previousTask1Millis = 0;
 unsigned long previousTask2Millis = 0;
-const unsigned long task1Interval = 3000; // 3 giây (SPS30 cần thời gian đọc)
+const unsigned long task1Interval = 2000; // 2 giây
 const unsigned long task2Interval = 1000; // 1 giây
 
-// Constants
-#define SENSOR_ERROR_VALUE -999.0f
-#define RS485_DELAY_MS 2
+// Constants cho giao tiếp Serial2
+byte start_byte_1 = 0x3C;
+byte start_byte_2 = 0xC3;
+unsigned int value = 0;
 
-// Hàm đọc dữ liệu từ SPS30
-bool getSPS30Data(SPS30Data *data)
+// Hàm đọc cảm biến HDC1000
+double readSensor(double *temperature)
 {
-    struct sps30_measurement m;
-    uint16_t data_ready;
-    int16_t ret;
+    uint8_t Byte[4];
+    uint16_t temp;
+    uint16_t humidity;
 
-    // Kiểm tra dữ liệu có sẵn không
-    ret = sps30_read_data_ready(&data_ready);
-    if (ret < 0 || !data_ready)
+    Wire.beginTransmission(0x40);
+    Wire.write(0x00);
+    Wire.endTransmission();
+    delay(20);
+    Wire.requestFrom(0x40, 4);
+
+    if (4 <= Wire.available())
     {
+        Byte[0] = Wire.read();
+        Byte[1] = Wire.read();
+        Byte[2] = Wire.read();
+        Byte[3] = Wire.read();
+
+        temp = (((unsigned int)Byte[0] << 8) | Byte[1]);
+        *temperature = (double)(temp) / 65536.0 * 165.0 - 40.0;
+
+        humidity = (((unsigned int)Byte[2] << 8) | Byte[3]);
+
+        return (double)(humidity) / 65536.0 * 100.0;
+    }
+
+    return -1; // Lỗi đọc
+}
+
+// Hàm đọc dữ liệu HDC1000
+bool getHDC1000Data(HDC1000Data *data)
+{
+    double temperature;
+    double humidity;
+
+    humidity = readSensor(&temperature);
+
+    // Kiểm tra dữ liệu hợp lệ
+    if (humidity < 0 || temperature < -40 || temperature > 125 || humidity > 100)
+    {
+        Serial.println("Loi doc du lieu HDC1000!");
         return false;
     }
 
-    // Đọc dữ liệu đo
-    ret = sps30_read_measurement(&m);
-    if (ret < 0)
-    {
-        Serial.println("Loi doc du lieu SPS30!");
-        return false;
-    }
-
-    // Kiểm tra tính hợp lệ của dữ liệu
-    if (isnan(m.mc_1p0) || isnan(m.mc_2p5) || isnan(m.mc_4p0) || isnan(m.mc_10p0))
-    {
-        Serial.println("Du lieu SPS30 khong hop le!");
-        return false;
-    }
-
-    // Sao chép dữ liệu
-    data->pm1_0 = m.mc_1p0;
-    data->pm2_5 = m.mc_2p5;
-    data->pm4_0 = m.mc_4p0;
-    data->pm10_0 = m.mc_10p0;
-
-#ifndef SPS30_LIMITED_I2C_BUFFER_SIZE
-    data->nc0_5 = m.nc_0p5;
-    data->nc1_0 = m.nc_1p0;
-    data->nc2_5 = m.nc_2p5;
-    data->nc4_0 = m.nc_4p0;
-    data->nc10_0 = m.nc_10p0;
-    data->typical_size = m.typical_particle_size;
-#else
-    // Nếu buffer hạn chế, đặt giá trị mặc định
-    data->nc0_5 = 0;
-    data->nc1_0 = 0;
-    data->nc2_5 = 0;
-    data->nc4_0 = 0;
-    data->nc10_0 = 0;
-    data->typical_size = 0;
-#endif
-
+    data->temperature = temperature;
+    data->humidity = humidity;
     data->dataValid = true;
+
     return true;
 }
 
-// Gửi dữ liệu qua RS485
-void sendRS485Data(String data)
+// Gửi dữ liệu qua Serial2 với định dạng mới
+void sendSerial2Data(String data)
 {
-    digitalWrite(RE_DE, HIGH);
-    delay(RS485_DELAY_MS);
-    RS485Serial.print(data);
-    RS485Serial.flush();
-    delay(RS485_DELAY_MS);
-    digitalWrite(RE_DE, LOW); // quay lại chế độ nhận
+    // Chuyển đổi string thành số để gửi
+    unsigned int dataValue = data.toInt(); // Hoặc có thể hash string
+
+    digitalWrite(TX_PIN, HIGH);
+    delayMicroseconds(1200);
+
+    Serial2.write(start_byte_1);
+    Serial2.write(start_byte_2);
+    Serial2.write((byte)(dataValue & 0x00FF));
+    Serial2.write((byte)(dataValue >> 8));
+    Serial2.flush();
+
+    delayMicroseconds(1200);
+    digitalWrite(TX_PIN, LOW);
 }
 
-// Nhiệm vụ 1: đọc cảm biến SPS30 và gửi RS485
+// Nhiệm vụ 1: đọc cảm biến HDC1000 và gửi RS485
 void task1Function()
 {
-    SPS30Data sensorData;
+    HDC1000Data sensorData;
 
-    if (getSPS30Data(&sensorData))
+    if (getHDC1000Data(&sensorData))
     {
         // Tạo chuỗi dữ liệu để gửi qua RS485
-        String dataString = "PM1.0:" + String(sensorData.pm1_0, 2) +
-                            ",PM2.5:" + String(sensorData.pm2_5, 2) +
-                            ",PM4.0:" + String(sensorData.pm4_0, 2) +
-                            ",PM10:" + String(sensorData.pm10_0, 2);
+        String dataString = "TEMP:" + String(sensorData.temperature, 2) +
+                            ",HUM:" + String(sensorData.humidity, 2);
 
-#ifndef SPS30_LIMITED_I2C_BUFFER_SIZE
-        dataString += ",NC0.5:" + String(sensorData.nc0_5, 1) +
-                      ",NC1.0:" + String(sensorData.nc1_0, 1) +
-                      ",NC2.5:" + String(sensorData.nc2_5, 1) +
-                      ",NC4.0:" + String(sensorData.nc4_0, 1) +
-                      ",NC10:" + String(sensorData.nc10_0, 1) +
-                      ",SIZE:" + String(sensorData.typical_size, 2);
-#endif
+        sendSerial2Data(dataString);
 
-        sendRS485Data(dataString);
-
-        Serial.print("Da gui qua RS485: ");
+        Serial.print("Da gui qua Serial2: ");
         Serial.println(dataString);
 
         // Cập nhật dữ liệu chia sẻ
         noInterrupts();
-        sharedSensorData.pm1_0 = sensorData.pm1_0;
-        sharedSensorData.pm2_5 = sensorData.pm2_5;
-        sharedSensorData.pm4_0 = sensorData.pm4_0;
-        sharedSensorData.pm10_0 = sensorData.pm10_0;
-        sharedSensorData.nc0_5 = sensorData.nc0_5;
-        sharedSensorData.nc1_0 = sensorData.nc1_0;
-        sharedSensorData.nc2_5 = sensorData.nc2_5;
-        sharedSensorData.nc4_0 = sensorData.nc4_0;
-        sharedSensorData.nc10_0 = sensorData.nc10_0;
-        sharedSensorData.typical_size = sensorData.typical_size;
+        sharedSensorData.temperature = sensorData.temperature;
+        sharedSensorData.humidity = sensorData.humidity;
         sharedSensorData.dataValid = sensorData.dataValid;
         newDataAvailable = true;
         interrupts();
     }
     else
     {
-        Serial.println("Loi lay du lieu cam bien SPS30!");
+        Serial.println("Loi lay du lieu cam bien HDC1000!");
     }
 }
 
@@ -162,116 +140,110 @@ void task2Function()
 {
     if (newDataAvailable)
     {
-        SPS30Data localData;
+        HDC1000Data localData;
         noInterrupts();
-        localData.pm1_0 = sharedSensorData.pm1_0;
-        localData.pm2_5 = sharedSensorData.pm2_5;
-        localData.pm4_0 = sharedSensorData.pm4_0;
-        localData.pm10_0 = sharedSensorData.pm10_0;
-        localData.nc0_5 = sharedSensorData.nc0_5;
-        localData.nc1_0 = sharedSensorData.nc1_0;
-        localData.nc2_5 = sharedSensorData.nc2_5;
-        localData.nc4_0 = sharedSensorData.nc4_0;
-        localData.nc10_0 = sharedSensorData.nc10_0;
-        localData.typical_size = sharedSensorData.typical_size;
+        localData.temperature = sharedSensorData.temperature;
+        localData.humidity = sharedSensorData.humidity;
         localData.dataValid = sharedSensorData.dataValid;
         newDataAvailable = false;
         interrupts();
 
         if (localData.dataValid)
         {
-            Serial.println("=== Du lieu cam bien SPS30 ===");
-            Serial.print("PM1.0: ");
-            Serial.print(localData.pm1_0);
-            Serial.println(" μg/m³");
-            Serial.print("PM2.5: ");
-            Serial.print(localData.pm2_5);
-            Serial.println(" μg/m³");
-            Serial.print("PM4.0: ");
-            Serial.print(localData.pm4_0);
-            Serial.println(" μg/m³");
-            Serial.print("PM10:  ");
-            Serial.print(localData.pm10_0);
-            Serial.println(" μg/m³");
-
-#ifndef SPS30_LIMITED_I2C_BUFFER_SIZE
-            Serial.print("NC0.5: ");
-            Serial.print(localData.nc0_5);
-            Serial.println(" #/cm³");
-            Serial.print("NC1.0: ");
-            Serial.print(localData.nc1_0);
-            Serial.println(" #/cm³");
-            Serial.print("NC2.5: ");
-            Serial.print(localData.nc2_5);
-            Serial.println(" #/cm³");
-            Serial.print("NC4.0: ");
-            Serial.print(localData.nc4_0);
-            Serial.println(" #/cm³");
-            Serial.print("NC10:  ");
-            Serial.print(localData.nc10_0);
-            Serial.println(" #/cm³");
-            Serial.print("Kich thuoc TB: ");
-            Serial.print(localData.typical_size);
-            Serial.println(" μm");
-#endif
-            Serial.println("==============================");
+            Serial.println("=== Du lieu cam bien HDC1000 ===");
+            Serial.print("Nhiet do: ");
+            Serial.print(localData.temperature);
+            Serial.println(" °C");
+            Serial.print("Do am: ");
+            Serial.print(localData.humidity);
+            Serial.println(" %");
+            Serial.println("================================");
         }
     }
 }
 
 void setup()
 {
-    Serial.begin(9600);
+    // Cấu hình LED và TX_PIN
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, LOW);
+    pinMode(TX_PIN, OUTPUT);
+    digitalWrite(TX_PIN, HIGH);
+
+    Serial.begin(115200);
+    Serial2.begin(115200);
+    Serial.println("Setup done");
     delay(2000);
 
-    // Cấu hình RS485
-    pinMode(RE_DE, OUTPUT);
-    digitalWrite(RE_DE, LOW);
-    RS485Serial.begin(9600);
+    // Khởi tạo I2C cho HDC1000
+    Wire.begin();
 
-    // Khởi tạo I2C và SPS30
-    sensirion_i2c_init();
+    // Cấu hình HDC1000
+    Wire.beginTransmission(0x40);
+    Wire.write(0x02);
+    Wire.write(0x90);
+    Wire.write(0x00);
+    Wire.endTransmission();
 
-    while (sps30_probe() != 0)
-    {
-        Serial.println("SPS30 sensor probing failed!");
-        delay(500);
-    }
+    delay(20);
 
-    Serial.println("SPS30 sensor probing successful!");
-
-    // Cấu hình auto cleaning (4 ngày)
-    int16_t ret = sps30_set_fan_auto_cleaning_interval_days(4);
-    if (ret)
-    {
-        Serial.print("Loi cau hinh auto-clean interval: ");
-        Serial.println(ret);
-    }
-
-    // Bắt đầu đo
-    ret = sps30_start_measurement();
-    if (ret < 0)
-    {
-        Serial.println("Loi bat dau do luong!");
-        while (1)
-            ; // Dừng nếu không thể bắt đầu đo
-    }
-
-    Serial.println("SPS30 bat dau do luong thanh cong!");
-    Serial.println("ATmega328P gui du lieu SPS30 qua RS485");
-
-#ifdef SPS30_LIMITED_I2C_BUFFER_SIZE
-    Serial.println("Chu y: Chi doc duoc Mass Concentration do gioi han buffer I2C");
-#endif
+    Serial.println("HDC1000 khoi tao thanh cong!");
+    Serial.println("ATmega328P gui du lieu HDC1000 qua Serial2");
+    Serial.println("HDC1000 I2C: SDA=A4, SCL=A5");
 
     delay(1000);
 }
 
 void loop()
 {
+    int c;
     unsigned long currentMillis = millis();
 
-    // Kiểm tra nếu đến thời gian thực hiện task1 (đọc cảm biến và gửi RS485)
+    // Xử lý nhận dữ liệu từ Serial2
+    while (!Serial.available() && Serial2.available() < 4)
+        ;
+
+    digitalWrite(LED_BUILTIN, HIGH);
+
+    if (Serial2.available() >= 4)
+    {
+        if (Serial2.read() == start_byte_1)
+        {
+            if (Serial2.read() == start_byte_2)
+            {
+                value = Serial2.read();
+                value += (((unsigned int)Serial2.read()) << 8) & 0xFF00;
+                Serial.print("< ");
+                Serial.println(value);
+                value = 0;
+            }
+        }
+    }
+
+    // Xử lý gửi dữ liệu từ Serial
+    if (Serial.available())
+    {
+        c = Serial.read();
+        if ((c >= '0') && (c <= '9'))
+            value = 10 * value + c - '0';
+        else if (c == 's')
+        {
+            Serial.print("> ");
+            Serial.println(value);
+            digitalWrite(TX_PIN, HIGH);
+            delayMicroseconds(1200);
+            Serial2.write(start_byte_1);
+            Serial2.write(start_byte_2);
+            Serial2.write((byte)(value & 0x00FF));
+            Serial2.write((byte)(value >> 8));
+            Serial2.flush();
+            delayMicroseconds(1200);
+            digitalWrite(TX_PIN, LOW);
+            value = 0;
+        }
+    }
+
+    // Kiểm tra nếu đến thời gian thực hiện task1 (đọc cảm biến và gửi Serial2)
     if (currentMillis - previousTask1Millis >= task1Interval)
     {
         previousTask1Millis = currentMillis;
@@ -284,4 +256,7 @@ void loop()
         previousTask2Millis = currentMillis;
         task2Function();
     }
+
+    delay(2);
+    digitalWrite(LED_BUILTIN, LOW);
 }

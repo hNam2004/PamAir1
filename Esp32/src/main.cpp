@@ -17,15 +17,33 @@ const int mqtt_port = 1883; // MQTT default port
 const char *mqtt_topic = "esp32/test11";
 
 #define BOOT_PIN 0
-#define RXD2 13  // RO từ MAX485 (GPIO16)
-#define TXD2 17  // DI đến MAX485 (GPIO17)
-#define RE_DE 23 // Điều khiển gửi / nhận (GPIO4)
+#define LED_BUILTIN 2 // Built-in LED trên ESP32
+#define RXD2 34       // MAX485 RO → ESP32 RX (GPIO34)
+#define TXD2 35       // MAX485 DI ← ESP32 TX (GPIO35)
+#define RE_DE 13      // MAX485 RE/DE ← ESP32 (GPIO4)
+// TX_PIN đã xóa vì chỉ nhận dữ liệu
 
 // Khai báo UART2 cho RS485
 HardwareSerial RS485Serial(2);
 HardwareSerial gpsSerial(1);
 TinyGPSPlus gps;
-// Cấu trúc dữ liệu cảm biến nhận từ RS485
+// Cấu trúc dữ liệu cảm biến SPS30 nhận từ RS485
+struct SPS30Data
+{
+    float pm1_0;        // PM1.0 [μg/m³]
+    float pm2_5;        // PM2.5 [μg/m³]
+    float pm4_0;        // PM4.0 [μg/m³]
+    float pm10_0;       // PM10.0 [μg/m³]
+    float nc0_5;        // Number concentration PM0.5 [#/cm³]
+    float nc1_0;        // Number concentration PM1.0 [#/cm³]
+    float nc2_5;        // Number concentration PM2.5 [#/cm³]
+    float nc4_0;        // Number concentration PM4.0 [#/cm³]
+    float nc10_0;       // Number concentration PM10.0 [#/cm³]
+    float typical_size; // Typical particle size [μm]
+    bool dataValid;
+};
+
+// Cấu trúc dữ liệu cảm biến HDC1080 (giữ lại để tương thích)
 struct SensorData
 {
     float temperature;
@@ -44,14 +62,133 @@ struct GPSData
 };
 
 // Queue để truyền dữ liệu cảm biến và GPS
-QueueHandle_t sensorQueue;
+QueueHandle_t sensorQueue; // Queue cho dữ liệu HDC1080
+QueueHandle_t sps30Queue;  // Queue cho dữ liệu SPS30
 QueueHandle_t gpsQueue;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 volatile uint8_t Interupt_Flag = 0;
 
-// Hàm parse dữ liệu cảm biến từ chuỗi
+// RS485 Protocol variables
+byte start_byte_1 = 0x3C;
+byte start_byte_2 = 0xC3;
+unsigned int rs485_value = 0;
+
+// Hàm parse dữ liệu SPS30 từ chuỗi theo định dạng chuẩn
+SPS30Data parseSPS30Data(String data)
+{
+    SPS30Data sps30Data;
+    sps30Data.dataValid = false;
+
+    // Khởi tạo giá trị mặc định
+    sps30Data.pm1_0 = 0;
+    sps30Data.pm2_5 = 0;
+    sps30Data.pm4_0 = 0;
+    sps30Data.pm10_0 = 0;
+    sps30Data.nc0_5 = 0;
+    sps30Data.nc1_0 = 0;
+    sps30Data.nc2_5 = 0;
+    sps30Data.nc4_0 = 0;
+    sps30Data.nc10_0 = 0;
+    sps30Data.typical_size = 0;
+
+    // Format chuẩn từ ATmega: "TYPE:SPS30,PM1:1.23,PM2.5:2.34,PM4:3.45,PM10:4.56,NC0.5:123.4,NC1:234.5,NC2.5:345.6,NC4:456.7,NC10:567.8,SIZE:1.23"
+
+    // Kiểm tra TYPE trước
+    if (data.indexOf("TYPE:SPS30") < 0)
+    {
+        return sps30Data; // Không phải dữ liệu SPS30
+    }
+
+    // Parse PM values với định dạng mới
+    int pm1Index = data.indexOf("PM1:");
+    int pm25Index = data.indexOf("PM2.5:");
+    int pm4Index = data.indexOf("PM4:");
+    int pm10Index = data.indexOf("PM10:");
+
+    if (pm1Index >= 0 && pm25Index >= 0 && pm4Index >= 0 && pm10Index >= 0)
+    {
+        // Parse PM1
+        String pm1Str = data.substring(pm1Index + 4, data.indexOf(",", pm1Index));
+        sps30Data.pm1_0 = pm1Str.toFloat();
+
+        // Parse PM2.5
+        String pm25Str = data.substring(pm25Index + 6, data.indexOf(",", pm25Index));
+        sps30Data.pm2_5 = pm25Str.toFloat();
+
+        // Parse PM4
+        String pm4Str = data.substring(pm4Index + 4, data.indexOf(",", pm4Index));
+        sps30Data.pm4_0 = pm4Str.toFloat();
+
+        // Parse PM10
+        int pm10End = data.indexOf(",", pm10Index);
+        if (pm10End == -1)
+            pm10End = data.length(); // Nếu là phần tử cuối
+        String pm10Str = data.substring(pm10Index + 5, pm10End);
+        sps30Data.pm10_0 = pm10Str.toFloat();
+
+        sps30Data.dataValid = true;
+
+        // Parse NC values (nếu có)
+        int nc05Index = data.indexOf("NC0.5:");
+        int nc1Index = data.indexOf("NC1:");
+        int nc25Index = data.indexOf("NC2.5:");
+        int nc4Index = data.indexOf("NC4:");
+        int nc10Index = data.indexOf("NC10:");
+        int sizeIndex = data.indexOf("SIZE:");
+
+        if (nc05Index >= 0)
+        {
+            int nc05End = data.indexOf(",", nc05Index);
+            if (nc05End == -1)
+                nc05End = data.length();
+            String nc05Str = data.substring(nc05Index + 6, nc05End);
+            sps30Data.nc0_5 = nc05Str.toFloat();
+        }
+        if (nc1Index >= 0)
+        {
+            int nc1End = data.indexOf(",", nc1Index);
+            if (nc1End == -1)
+                nc1End = data.length();
+            String nc1Str = data.substring(nc1Index + 4, nc1End);
+            sps30Data.nc1_0 = nc1Str.toFloat();
+        }
+        if (nc25Index >= 0)
+        {
+            int nc25End = data.indexOf(",", nc25Index);
+            if (nc25End == -1)
+                nc25End = data.length();
+            String nc25Str = data.substring(nc25Index + 6, nc25End);
+            sps30Data.nc2_5 = nc25Str.toFloat();
+        }
+        if (nc4Index >= 0)
+        {
+            int nc4End = data.indexOf(",", nc4Index);
+            if (nc4End == -1)
+                nc4End = data.length();
+            String nc4Str = data.substring(nc4Index + 4, nc4End);
+            sps30Data.nc4_0 = nc4Str.toFloat();
+        }
+        if (nc10Index >= 0)
+        {
+            int nc10End = data.indexOf(",", nc10Index);
+            if (nc10End == -1)
+                nc10End = data.length();
+            String nc10Str = data.substring(nc10Index + 5, nc10End);
+            sps30Data.nc10_0 = nc10Str.toFloat();
+        }
+        if (sizeIndex >= 0)
+        {
+            String sizeStr = data.substring(sizeIndex + 5);
+            sps30Data.typical_size = sizeStr.toFloat();
+        }
+    }
+
+    return sps30Data;
+}
+
+// Hàm parse dữ liệu HDC1080 từ chuỗi (giữ lại để tương thích)
 SensorData parseSensorData(String data)
 {
     SensorData sensorData;
@@ -89,44 +226,44 @@ SensorData parseSensorData(String data)
     return sensorData;
 }
 
-// Hàm nhận dữ liệu từ RS485
+// Hàm xử lý RS485 - chỉ nhận dữ liệu
 void processRS485Command()
 {
-    if (RS485Serial.available())
+    // Wait for data on serial - chờ đủ 4 bytes
+    if (RS485Serial.available() >= 4)
     {
-        String receivedData = RS485Serial.readString();
-        receivedData.trim(); // Loại bỏ ký tự xuống dòng
+        digitalWrite(LED_BUILTIN, HIGH);
 
-        Serial.print("Nhan du lieu RS485: ");
-        Serial.println(receivedData);
-
-        // Parse dữ liệu cảm biến
-        if (receivedData.length() > 0)
+        if (RS485Serial.read() == start_byte_1)
         {
-            SensorData sensorData = parseSensorData(receivedData);
+            if (RS485Serial.read() == start_byte_2)
+            {
+                rs485_value = RS485Serial.read();
+                rs485_value += (((unsigned int)RS485Serial.read()) << 8) & 0xFF00;
+                Serial.print("< RS485 received: ");
+                Serial.println(rs485_value);
 
-            if (sensorData.dataValid)
-            {
-                // Gửi dữ liệu vào queue
-                if (xQueueSend(sensorQueue, &sensorData, pdMS_TO_TICKS(100)) == pdTRUE)
+                // Xử lý giá trị nhận được (không gửi lại)
+                rs485_value = (rs485_value >> 2) + 1;
+                Serial.print("Processed value: ");
+                Serial.println(rs485_value);
+
+                // Tạo dữ liệu test để gửi vào queue
+                SensorData testData;
+                testData.temperature = 25.0 + (rs485_value % 15);
+                testData.humidity = 50.0 + (rs485_value % 30);
+                testData.dataValid = true;
+
+                // Gửi vào queue
+                if (xQueueSend(sensorQueue, &testData, pdMS_TO_TICKS(100)) == pdTRUE)
                 {
-                    Serial.print("Nhiet do: ");
-                    Serial.print(sensorData.temperature);
-                    Serial.print(" °C  |  Do am: ");
-                    Serial.print(sensorData.humidity);
-                    Serial.println(" %");
-                    Serial.println("Du lieu da gui vao queue thanh cong");
+                    Serial.println("RS485 data sent to queue successfully");
                 }
-                else
-                {
-                    Serial.println("Khong the gui du lieu vao queue!");
-                }
-            }
-            else
-            {
-                Serial.println("Du lieu khong hop le!");
             }
         }
+
+        digitalWrite(LED_BUILTIN, LOW);
+        rs485_value = 0;
     }
 }
 
@@ -228,14 +365,22 @@ void task5Function(void *parameter)
     while (true)
     {
         SensorData sensorData;
+        SPS30Data sps30Data;
         GPSData gpsData;
         bool hasSensorData = false;
+        bool hasSPS30Data = false;
         bool hasGPSData = false;
 
-        // Đọc dữ liệu cảm biến từ queue
+        // Đọc dữ liệu HDC1080 từ queue
         if (xQueueReceive(sensorQueue, &sensorData, pdMS_TO_TICKS(50)) == pdTRUE)
         {
             hasSensorData = true;
+        }
+
+        // Đọc dữ liệu SPS30 từ queue
+        if (xQueueReceive(sps30Queue, &sps30Data, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
+            hasSPS30Data = true;
         }
 
         // Đọc dữ liệu GPS từ queue
@@ -245,22 +390,41 @@ void task5Function(void *parameter)
         }
 
         // Gửi dữ liệu lên MQTT nếu có WiFi
-        if ((hasSensorData || hasGPSData) && wifiState == WIFI_CONNECTED)
+        if ((hasSensorData || hasSPS30Data || hasGPSData) && wifiState == WIFI_CONNECTED)
         {
             // Create a character array to hold the JSON string
-            char jsonBuffer[256];
-            for (int i = 0; i < 256; i++)
+            char jsonBuffer[512]; // Tăng kích thước buffer cho SPS30 data
+            for (int i = 0; i < 512; i++)
             {
                 jsonBuffer[i] = 0;
             }
 
-            // Tạo JSON với cả sensor và GPS data
-            String jsonString = "{\"device\":\"ESP32_RS485_HDC1080\"";
+            // Tạo JSON với cả sensor, SPS30 và GPS data
+            String jsonString = "{\"device\":\"ESP32_RS485_Multi_Sensor\"";
 
             if (hasSensorData)
             {
                 jsonString += ",\"temperature\":" + String(sensorData.temperature, 2);
                 jsonString += ",\"humidity\":" + String(sensorData.humidity, 2);
+            }
+
+            if (hasSPS30Data)
+            {
+                jsonString += ",\"pm1_0\":" + String(sps30Data.pm1_0, 2);
+                jsonString += ",\"pm2_5\":" + String(sps30Data.pm2_5, 2);
+                jsonString += ",\"pm4_0\":" + String(sps30Data.pm4_0, 2);
+                jsonString += ",\"pm10_0\":" + String(sps30Data.pm10_0, 2);
+
+                // Thêm NC data nếu có
+                if (sps30Data.nc0_5 > 0 || sps30Data.nc1_0 > 0)
+                {
+                    jsonString += ",\"nc0_5\":" + String(sps30Data.nc0_5, 1);
+                    jsonString += ",\"nc1_0\":" + String(sps30Data.nc1_0, 1);
+                    jsonString += ",\"nc2_5\":" + String(sps30Data.nc2_5, 1);
+                    jsonString += ",\"nc4_0\":" + String(sps30Data.nc4_0, 1);
+                    jsonString += ",\"nc10_0\":" + String(sps30Data.nc10_0, 1);
+                    jsonString += ",\"typical_size\":" + String(sps30Data.typical_size, 2);
+                }
             }
 
             if (hasGPSData)
@@ -297,27 +461,55 @@ void task5Function(void *parameter)
 void setup()
 {
     Serial.begin(9600);
-    gpsSerial.begin(9600);
-    // Khởi tạo RS485
+    delay(1000);
+    Serial.println("=== ESP32 STARTING ===");
+
+    // GPS tạm thời bị vô hiệu hóa
+    Serial.println("GPS disabled - no pins defined");
+
+    // Khởi tạo RS485 - chỉ nhận dữ liệu
+    Serial.println("Khoi tao RS485...");
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, LOW);
     pinMode(RE_DE, OUTPUT);
-    digitalWrite(RE_DE, LOW);                        // Mặc định là chế độ nhận
-    RS485Serial.begin(9600, SERIAL_8N1, 24, 26); // UART2
-    Serial.println("RS485 da khoi tao");
+    digitalWrite(RE_DE, LOW);                          // Mặc định là chế độ nhận
+    RS485Serial.begin(115200, SERIAL_8N1, RXD2, TXD2); // Baudrate 115200
+    Serial.println("RS485 da khoi tao - chi nhan du lieu");
 
-    Serial.println("Cam bien HDC1080 nhan du lieu qua RS485");
+    Serial.println("ESP32 nhan du lieu tu cam bien SPS30 va HDC1080 qua RS485");
 
+    Serial.println("Khoi tao WiFi...");
     sys_wifi_init();
+    Serial.println("WiFi da khoi tao");
+
+    Serial.println("Khoi tao CapServer...");
     sys_capserver_init();
+    Serial.println("CapServer da khoi tao");
+
+    Serial.println("Cau hinh GPIO...");
     pinMode(BOOT_PIN, INPUT_PULLUP);                                                // Configure BOOT pin as input with internal pull-up resistor
     attachInterrupt(digitalPinToInterrupt(BOOT_PIN), bootInterruptHandler, RISING); // Attach interrupt handler to rising edge of BOOT pin
-    Serial.println("All Done!");
+    Serial.println("GPIO da cau hinh");
+
+    Serial.println("Khoi tao MQTT...");
     client.setServer(mqtt_server, mqtt_port);
+    Serial.println("MQTT da khoi tao");
 
     // Create queues
-    sensorQueue = xQueueCreate(5, sizeof(SensorData)); // Queue có thể chứa 5 phần tử SensorData
+    Serial.println("Tao queues...");
+    sensorQueue = xQueueCreate(5, sizeof(SensorData)); // Queue có thể chứa 5 phần tử SensorData (HDC1080)
     if (sensorQueue == NULL)
     {
         Serial.println("Loi tao sensor queue!");
+        while (1)
+            ;
+    }
+    Serial.println("Sensor queue da tao");
+
+    sps30Queue = xQueueCreate(5, sizeof(SPS30Data)); // Queue có thể chứa 5 phần tử SPS30Data
+    if (sps30Queue == NULL)
+    {
+        Serial.println("Loi tao SPS30 queue!");
         while (1)
             ;
     }
@@ -331,6 +523,7 @@ void setup()
     }
 
     // Tạo các tasks
+    Serial.println("Tao tasks...");
     xTaskCreate(
         task1Function, // Task function (RS485 handler)
         "Task 1",      // Task name
@@ -339,15 +532,17 @@ void setup()
         2,             // Task priority
         NULL           // Task handle
     );
+    Serial.println("Task 1 da tao");
 
-    xTaskCreate(
-        gpsReadTask, // Task function (GPS reader)
-        "GPS Task",  // Task name
-        10000,       // Stack size (bytes)
-        NULL,        // Task parameters
-        2,           // Task priority
-        NULL         // Task handle
-    );
+    // GPS task disabled - no GPS pins defined
+    // xTaskCreate(
+    //     gpsReadTask, // Task function (GPS reader)
+    //     "GPS Task",  // Task name
+    //     10000,       // Stack size (bytes)
+    //     NULL,        // Task parameters
+    //     2,           // Task priority
+    //     NULL         // Task handle
+    // );
 
     xTaskCreate(
         task3Function, // Task function

@@ -17,11 +17,11 @@ const int mqtt_port = 1883; // MQTT default port
 const char *mqtt_topic = "esp32/test11";
 
 #define BOOT_PIN 0
-#define RXD2 34  // RO từ MAX485 (GPIO16)
-#define TXD2 35  // DI đến MAX485 (GPIO17)
-#define RE_DE 13 // Điều khiển gửi / nhận (GPIO4)
-#define GPS_RX 16  // Chân RX cho GPS
-#define GPS_TX 17  // Chân TX cho GPS
+#define LED_BUILTIN 2 // Built-in LED trên ESP32
+#define RXD2 34       // MAX485 RO → ESP32 RX (GPIO34)
+#define TXD2 35       // MAX485 DI ← ESP32 TX (GPIO35)
+#define RE_DE 13      // MAX485 RE/DE ← ESP32 (GPIO4)
+// TX_PIN đã xóa vì chỉ nhận dữ liệu
 
 // Khai báo UART2 cho RS485
 HardwareSerial RS485Serial(2);
@@ -69,6 +69,11 @@ QueueHandle_t gpsQueue;
 WiFiClient espClient;
 PubSubClient client(espClient);
 volatile uint8_t Interupt_Flag = 0;
+
+// RS485 Protocol variables
+byte start_byte_1 = 0x3C;
+byte start_byte_2 = 0xC3;
+unsigned int rs485_value = 0;
 
 // Hàm parse dữ liệu SPS30 từ chuỗi theo định dạng chuẩn
 SPS30Data parseSPS30Data(String data)
@@ -221,122 +226,44 @@ SensorData parseSensorData(String data)
     return sensorData;
 }
 
-// Buffer để lưu dữ liệu RS485 chưa hoàn chỉnh
-String rs485Buffer = "";
-
-// Hàm gửi dữ liệu qua RS485 với định dạng chuẩn (nếu ESP32 cần gửi dữ liệu)
-void sendRS485Data(String sensorType, String data)
-{
-    digitalWrite(RE_DE, HIGH);
-    delay(2);
-
-    // Thêm header và footer để đảm bảo tính toàn vẹn dữ liệu
-    String formattedData = "<" + sensorType + ">" + data + "</" + sensorType + ">\n";
-    RS485Serial.print(formattedData);
-    RS485Serial.flush();
-
-    delay(2);
-    digitalWrite(RE_DE, LOW); // quay lại chế độ nhận
-}
-
-// Hàm nhận dữ liệu từ RS485 với định dạng chuẩn
+// Hàm xử lý RS485 - chỉ nhận dữ liệu
 void processRS485Command()
 {
-    if (RS485Serial.available())
+    // Wait for data on serial - chờ đủ 4 bytes
+    if (RS485Serial.available() >= 4)
     {
-        String newData = RS485Serial.readString();
-        rs485Buffer += newData;
+        digitalWrite(LED_BUILTIN, HIGH);
 
-        // Tìm kiếm gói dữ liệu hoàn chỉnh với header và footer
-        int startIndex = rs485Buffer.indexOf("<SPS30>");
-        int endIndex = rs485Buffer.indexOf("</SPS30>");
-
-        if (startIndex >= 0 && endIndex >= 0 && endIndex > startIndex)
+        if (RS485Serial.read() == start_byte_1)
         {
-            // Trích xuất dữ liệu giữa header và footer
-            String receivedData = rs485Buffer.substring(startIndex + 7, endIndex);
-            receivedData.trim(); // Loại bỏ ký tự xuống dòng và khoảng trắng
-
-            Serial.print("Nhan du lieu RS485: ");
-            Serial.println(receivedData);
-
-            // Xóa dữ liệu đã xử lý khỏi buffer
-            rs485Buffer = rs485Buffer.substring(endIndex + 8);
-
-            // Parse dữ liệu cảm biến
-            if (receivedData.length() > 0)
+            if (RS485Serial.read() == start_byte_2)
             {
-                // Kiểm tra TYPE để xác định loại dữ liệu
-                if (receivedData.indexOf("TYPE:SPS30") >= 0)
-                {
-                    // Dữ liệu từ SPS30
-                    SPS30Data sps30Data = parseSPS30Data(receivedData);
+                rs485_value = RS485Serial.read();
+                rs485_value += (((unsigned int)RS485Serial.read()) << 8) & 0xFF00;
+                Serial.print("< RS485 received: ");
+                Serial.println(rs485_value);
 
-                    if (sps30Data.dataValid)
-                    {
-                        // Gửi dữ liệu SPS30 vào queue
-                        if (xQueueSend(sps30Queue, &sps30Data, pdMS_TO_TICKS(100)) == pdTRUE)
-                        {
-                            Serial.print("SPS30 - PM1: ");
-                            Serial.print(sps30Data.pm1_0);
-                            Serial.print(" μg/m³  |  PM2.5: ");
-                            Serial.print(sps30Data.pm2_5);
-                            Serial.print(" μg/m³  |  PM4: ");
-                            Serial.print(sps30Data.pm4_0);
-                            Serial.print(" μg/m³  |  PM10: ");
-                            Serial.print(sps30Data.pm10_0);
-                            Serial.println(" μg/m³");
-                            Serial.println("Du lieu SPS30 da gui vao queue thanh cong");
-                        }
-                        else
-                        {
-                            Serial.println("Khong the gui du lieu SPS30 vao queue!");
-                        }
-                    }
-                    else
-                    {
-                        Serial.println("Du lieu SPS30 khong hop le!");
-                    }
-                }
-                else if (receivedData.indexOf("TYPE:HDC1080") >= 0 || receivedData.indexOf("TEMP:") >= 0)
-                {
-                    // Dữ liệu từ HDC1080 (nhiệt độ/độ ẩm)
-                    SensorData sensorData = parseSensorData(receivedData);
+                // Xử lý giá trị nhận được (không gửi lại)
+                rs485_value = (rs485_value >> 2) + 1;
+                Serial.print("Processed value: ");
+                Serial.println(rs485_value);
 
-                    if (sensorData.dataValid)
-                    {
-                        // Gửi dữ liệu HDC1080 vào queue
-                        if (xQueueSend(sensorQueue, &sensorData, pdMS_TO_TICKS(100)) == pdTRUE)
-                        {
-                            Serial.print("HDC1080 - Nhiet do: ");
-                            Serial.print(sensorData.temperature);
-                            Serial.print(" °C  |  Do am: ");
-                            Serial.print(sensorData.humidity);
-                            Serial.println(" %");
-                            Serial.println("Du lieu HDC1080 da gui vao queue thanh cong");
-                        }
-                        else
-                        {
-                            Serial.println("Khong the gui du lieu HDC1080 vao queue!");
-                        }
-                    }
-                    else
-                    {
-                        Serial.println("Du lieu HDC1080 khong hop le!");
-                    }
-                }
-                else
+                // Tạo dữ liệu test để gửi vào queue
+                SensorData testData;
+                testData.temperature = 25.0 + (rs485_value % 15);
+                testData.humidity = 50.0 + (rs485_value % 30);
+                testData.dataValid = true;
+
+                // Gửi vào queue
+                if (xQueueSend(sensorQueue, &testData, pdMS_TO_TICKS(100)) == pdTRUE)
                 {
-                    Serial.println("Khong nhan dien duoc loai du lieu!");
+                    Serial.println("RS485 data sent to queue successfully");
                 }
             }
         }
 
-        // Giới hạn kích thước buffer để tránh tràn bộ nhớ
-        if (rs485Buffer.length() > 500)
-        {
-            rs485Buffer = rs485Buffer.substring(rs485Buffer.length() - 200);
-        }
+        digitalWrite(LED_BUILTIN, LOW);
+        rs485_value = 0;
     }
 }
 
@@ -534,23 +461,42 @@ void task5Function(void *parameter)
 void setup()
 {
     Serial.begin(9600);
-    gpsSerial.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
-    // Khởi tạo RS485
+    delay(1000);
+    Serial.println("=== ESP32 STARTING ===");
+
+    // GPS tạm thời bị vô hiệu hóa
+    Serial.println("GPS disabled - no pins defined");
+
+    // Khởi tạo RS485 - chỉ nhận dữ liệu
+    Serial.println("Khoi tao RS485...");
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, LOW);
     pinMode(RE_DE, OUTPUT);
-    digitalWrite(RE_DE, LOW);                    // Mặc định là chế độ nhận
-    RS485Serial.begin(9600, SERIAL_8N1, 24, 26); // UART2
-    Serial.println("RS485 da khoi tao");
+    digitalWrite(RE_DE, LOW);                          // Mặc định là chế độ nhận
+    RS485Serial.begin(115200, SERIAL_8N1, RXD2, TXD2); // Baudrate 115200
+    Serial.println("RS485 da khoi tao - chi nhan du lieu");
 
     Serial.println("ESP32 nhan du lieu tu cam bien SPS30 va HDC1080 qua RS485");
 
+    Serial.println("Khoi tao WiFi...");
     sys_wifi_init();
+    Serial.println("WiFi da khoi tao");
+
+    Serial.println("Khoi tao CapServer...");
     sys_capserver_init();
+    Serial.println("CapServer da khoi tao");
+
+    Serial.println("Cau hinh GPIO...");
     pinMode(BOOT_PIN, INPUT_PULLUP);                                                // Configure BOOT pin as input with internal pull-up resistor
     attachInterrupt(digitalPinToInterrupt(BOOT_PIN), bootInterruptHandler, RISING); // Attach interrupt handler to rising edge of BOOT pin
-    Serial.println("All Done!");
+    Serial.println("GPIO da cau hinh");
+
+    Serial.println("Khoi tao MQTT...");
     client.setServer(mqtt_server, mqtt_port);
+    Serial.println("MQTT da khoi tao");
 
     // Create queues
+    Serial.println("Tao queues...");
     sensorQueue = xQueueCreate(5, sizeof(SensorData)); // Queue có thể chứa 5 phần tử SensorData (HDC1080)
     if (sensorQueue == NULL)
     {
@@ -558,6 +504,7 @@ void setup()
         while (1)
             ;
     }
+    Serial.println("Sensor queue da tao");
 
     sps30Queue = xQueueCreate(5, sizeof(SPS30Data)); // Queue có thể chứa 5 phần tử SPS30Data
     if (sps30Queue == NULL)
@@ -576,6 +523,7 @@ void setup()
     }
 
     // Tạo các tasks
+    Serial.println("Tao tasks...");
     xTaskCreate(
         task1Function, // Task function (RS485 handler)
         "Task 1",      // Task name
@@ -584,15 +532,17 @@ void setup()
         2,             // Task priority
         NULL           // Task handle
     );
+    Serial.println("Task 1 da tao");
 
-    xTaskCreate(
-        gpsReadTask, // Task function (GPS reader)
-        "GPS Task",  // Task name
-        10000,       // Stack size (bytes)
-        NULL,        // Task parameters
-        2,           // Task priority
-        NULL         // Task handle
-    );
+    // GPS task disabled - no GPS pins defined
+    // xTaskCreate(
+    //     gpsReadTask, // Task function (GPS reader)
+    //     "GPS Task",  // Task name
+    //     10000,       // Stack size (bytes)
+    //     NULL,        // Task parameters
+    //     2,           // Task priority
+    //     NULL         // Task handle
+    // );
 
     xTaskCreate(
         task3Function, // Task function

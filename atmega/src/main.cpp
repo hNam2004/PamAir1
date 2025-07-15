@@ -86,23 +86,19 @@ bool getHDC1000Data(HDC1000Data *data)
     return true;
 }
 
-// Gửi dữ liệu qua Serial2 với định dạng mới
-void sendSerial2Data(String data)
+// Gửi dữ liệu qua RS485 với định dạng chuẩn
+void sendRS485Data(String data)
 {
-    // Chuyển đổi string thành số để gửi
-    unsigned int dataValue = data.toInt(); // Hoặc có thể hash string
-
-    digitalWrite(TX_PIN, HIGH);
+    digitalWrite(TX_PIN, HIGH); // Chế độ gửi
     delayMicroseconds(1200);
 
-    Serial2.write(start_byte_1);
-    Serial2.write(start_byte_2);
-    Serial2.write((byte)(dataValue & 0x00FF));
-    Serial2.write((byte)(dataValue >> 8));
+    // Thêm header và footer để đảm bảo tính toàn vẹn dữ liệu
+    String formattedData = "<HDC1080>" + data + "</HDC1080>\n";
+    Serial2.print(formattedData);
     Serial2.flush();
 
     delayMicroseconds(1200);
-    digitalWrite(TX_PIN, LOW);
+    digitalWrite(TX_PIN, LOW); // Chế độ nhận
 }
 
 // Nhiệm vụ 1: đọc cảm biến HDC1000 và gửi RS485
@@ -112,13 +108,15 @@ void task1Function()
 
     if (getHDC1000Data(&sensorData))
     {
-        // Tạo chuỗi dữ liệu để gửi qua RS485
-        String dataString = "TEMP:" + String(sensorData.temperature, 2) +
-                            ",HUM:" + String(sensorData.humidity, 2);
+        // Tạo chuỗi dữ liệu theo định dạng chuẩn để gửi qua RS485
+        // Format: TYPE:HDC1080,TEMP:value,HUM:value
+        String dataString = "TYPE:HDC1080";
+        dataString += ",TEMP:" + String(sensorData.temperature, 2);
+        dataString += ",HUM:" + String(sensorData.humidity, 2);
 
-        sendSerial2Data(dataString);
+        sendRS485Data(dataString);
 
-        Serial.print("Da gui qua Serial2: ");
+        Serial.print("Da gui qua RS485: ");
         Serial.println(dataString);
 
         // Cập nhật dữ liệu chia sẻ
@@ -171,7 +169,7 @@ void setup()
     digitalWrite(TX_PIN, HIGH);
 
     Serial.begin(115200);
-    Serial2.begin(115200);
+    Serial2.begin(115200); // Baudrate phải khớp với ESP32
     Serial.println("Setup done");
     delay(2000);
 
@@ -188,8 +186,9 @@ void setup()
     delay(20);
 
     Serial.println("HDC1000 khoi tao thanh cong!");
-    Serial.println("ATmega328P gui du lieu HDC1000 qua Serial2");
+    Serial.println("ATmega328P gui du lieu HDC1000 qua RS485");
     Serial.println("HDC1000 I2C: SDA=A4, SCL=A5");
+    Serial.println("RS485: RX=14, TX=15, RE_DE=12");
 
     delay(1000);
 }
@@ -199,47 +198,42 @@ void loop()
     int c;
     unsigned long currentMillis = millis();
 
-    // Xử lý nhận dữ liệu từ Serial2
-    while (!Serial.available() && Serial2.available() < 4)
-        ;
-
-    digitalWrite(LED_BUILTIN, HIGH);
-
-    if (Serial2.available() >= 4)
+    // Xử lý nhận dữ liệu từ RS485 (nếu cần)
+    if (Serial2.available())
     {
-        if (Serial2.read() == start_byte_1)
+        String receivedData = Serial2.readString();
+        receivedData.trim();
+
+        // Kiểm tra xem có phải là lệnh từ ESP32 không
+        if (receivedData.indexOf("<ESP32>") >= 0 && receivedData.indexOf("</ESP32>") >= 0)
         {
-            if (Serial2.read() == start_byte_2)
+            // Trích xuất dữ liệu giữa header và footer
+            int startIndex = receivedData.indexOf("<ESP32>") + 7;
+            int endIndex = receivedData.indexOf("</ESP32>");
+            String command = receivedData.substring(startIndex, endIndex);
+
+            Serial.print("Nhan lenh tu ESP32: ");
+            Serial.println(command);
+
+            // Xử lý lệnh nếu cần
+            if (command == "GET_DATA")
             {
-                value = Serial2.read();
-                value += (((unsigned int)Serial2.read()) << 8) & 0xFF00;
-                Serial.print("< ");
-                Serial.println(value);
-                value = 0;
+                // Gửi dữ liệu ngay lập tức
+                task1Function();
             }
         }
     }
 
-    // Xử lý gửi dữ liệu từ Serial
+    // Xử lý lệnh từ Serial (để debug)
     if (Serial.available())
     {
-        c = Serial.read();
-        if ((c >= '0') && (c <= '9'))
-            value = 10 * value + c - '0';
-        else if (c == 's')
+        String command = Serial.readStringUntil('\n');
+        command.trim();
+
+        if (command == "send")
         {
-            Serial.print("> ");
-            Serial.println(value);
-            digitalWrite(TX_PIN, HIGH);
-            delayMicroseconds(1200);
-            Serial2.write(start_byte_1);
-            Serial2.write(start_byte_2);
-            Serial2.write((byte)(value & 0x00FF));
-            Serial2.write((byte)(value >> 8));
-            Serial2.flush();
-            delayMicroseconds(1200);
-            digitalWrite(TX_PIN, LOW);
-            value = 0;
+            // Gửi dữ liệu ngay lập tức
+            task1Function();
         }
     }
 

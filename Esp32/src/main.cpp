@@ -21,6 +21,7 @@ const char *mqtt_topic = "esp32/test11";
 #define RXD2 34       // MAX485 RO → ESP32 RX (GPIO34)
 #define TXD2 35       // MAX485 DI ← ESP32 TX (GPIO35)
 #define RE_DE 13      // MAX485 RE/DE ← ESP32 (GPIO4)
+#define MOSFET_PIN 23 // GPIO5 - điều khiển MOSFET khi nhận tín hiệu RS485
 // TX_PIN đã xóa vì chỉ nhận dữ liệu
 
 // Khai báo UART2 cho RS485
@@ -148,6 +149,11 @@ void processRS485Command()
 {
     if (RS485Serial.available())
     {
+        // Bật MOSFET khi nhận tín hiệu RS485
+        digitalWrite(MOSFET_PIN, HIGH);
+        digitalWrite(LED_BUILTIN, HIGH);
+        Serial.println("MOSFET ON - RS485 signal received!");
+
         String newData = RS485Serial.readString();
         rs485Buffer += newData;
 
@@ -183,17 +189,37 @@ void processRS485Command()
                         Serial.print(sensorData.humidity);
                         Serial.println(" %");
                         Serial.println("Du lieu HDC1080 da gui vao queue thanh cong");
+
+                        // Giữ MOSFET bật trong 3 giây sau khi xử lý thành công
+                        delay(3000);
+                        digitalWrite(MOSFET_PIN, LOW);
+                        digitalWrite(LED_BUILTIN, LOW);
+                        Serial.println("MOSFET OFF - Processing completed");
                     }
                     else
                     {
                         Serial.println("Khong the gui du lieu HDC1080 vao queue!");
+                        // Tắt MOSFET nếu lỗi
+                        digitalWrite(MOSFET_PIN, LOW);
+                        digitalWrite(LED_BUILTIN, LOW);
                     }
                 }
                 else
                 {
                     Serial.println("Du lieu HDC1080 khong hop le!");
+                    // Tắt MOSFET nếu dữ liệu không hợp lệ
+                    digitalWrite(MOSFET_PIN, LOW);
+                    digitalWrite(LED_BUILTIN, LOW);
                 }
             }
+        }
+        else
+        {
+            // Nếu chưa nhận đủ dữ liệu, tắt MOSFET sau 1 giây
+            delay(1000);
+            digitalWrite(MOSFET_PIN, LOW);
+            digitalWrite(LED_BUILTIN, LOW);
+            Serial.println("MOSFET OFF - Incomplete data");
         }
 
         // Giới hạn kích thước buffer để tránh tràn bộ nhớ
@@ -378,13 +404,18 @@ void setup()
     // GPS tạm thời bị vô hiệu hóa
     Serial.println("GPS disabled - no pins defined");
 
+    // Khởi tạo MOSFET control
+    pinMode(MOSFET_PIN, OUTPUT);
+    digitalWrite(MOSFET_PIN, LOW); // Mặc định tắt MOSFET
+    Serial.println("MOSFET control initialized");
+
     // Khởi tạo RS485 - chỉ nhận dữ liệu
     Serial.println("Khoi tao RS485...");
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, LOW);
     pinMode(RE_DE, OUTPUT);
-    digitalWrite(RE_DE, LOW);                          // Mặc định là chế độ nhận
-    RS485Serial.begin(115200, SERIAL_8N1, RXD2, TXD2); // Baudrate 115200
+    digitalWrite(RE_DE, LOW);                        // Mặc định là chế độ nhận
+    RS485Serial.begin(115200, SERIAL_8N1, RXD2, -1); // Baudrate 9600
     Serial.println("RS485 da khoi tao - co the gui/nhan du lieu");
 
     Serial.println("ESP32 nhan du lieu HDC1080 tu ATmega qua RS485");

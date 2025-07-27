@@ -1,14 +1,22 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <SoftwareSerial.h>
+#include "sensirion_uart.h"
+#include "sensirion_shdlc.h"
+#include "sps30.h"
 
 // Chân điều khiển TX và Serial2 (SoftwareSerial)
 #define TX_PIN 15
 #define RX_PIN 14
 #define TX2_PIN 12
 
+// Chân UART cho SPS30
+#define SPS30_RX 8
+#define SPS30_TX 9
+
 // Tạo SoftwareSerial thay cho Serial2
 SoftwareSerial Serial2(RX_PIN, TX2_PIN);
+SoftwareSerial sps30Serial(SPS30_RX, SPS30_TX); // RX, TX cho SPS30
 
 // Cấu trúc dữ liệu cảm biến HDC1000
 struct HDC1000Data
@@ -18,22 +26,82 @@ struct HDC1000Data
     bool dataValid;
 };
 
-// Biến chia sẻ dữ liệu giữa các nhiệm vụ
-volatile HDC1000Data sharedSensorData;
-volatile bool newDataAvailable = false;
+// Cấu trúc dữ liệu cảm biến SPS30
+struct SPS30Data
+{
+    float pm1_0;        // PM1.0 [μg/m³]
+    float pm2_5;        // PM2.5 [μg/m³]
+    float pm4_0;        // PM4.0 [μg/m³]
+    float pm10_0;       // PM10.0 [μg/m³]
+    float nc0_5;        // Number concentration PM0.5 [#/cm³]
+    float nc1_0;        // Number concentration PM1.0 [#/cm³]
+    float nc2_5;        // Number concentration PM2.5 [#/cm³]
+    float nc4_0;        // Number concentration PM4.0 [#/cm³]
+    float nc10_0;       // Number concentration PM10.0 [#/cm³]
+    float typical_size; // Typical particle size [μm]
+    bool dataValid;
+};
 
-// Thời gian kiểm tra nhiệm vụ
+// Biến chia sẻ dữ liệu giữa các nhiệm vụ
+volatile HDC1000Data sharedHDCData;
+volatile SPS30Data sharedSPS30Data;
+volatile bool newHDCDataAvailable = false;
+volatile bool newSPS30DataAvailable = false;
+
+// Thời gian kiểm tra nhiệm vụ - Tối ưu intervals
 unsigned long previousTask1Millis = 0;
 unsigned long previousTask2Millis = 0;
-const unsigned long task1Interval = 2000; // 2 giây
-const unsigned long task2Interval = 1000; // 1 giây
+unsigned long previousTask3Millis = 0;
+const unsigned long task1Interval = 3000; // 3 giây - HDC1000 (giảm tần suất)
+const unsigned long task2Interval = 5000; // 5 giây - SPS30 (tăng để ổn định)
+const unsigned long task3Interval = 1000; // 1 giây - Display data
+
+// Flags để tối ưu hiển thị
+bool sps30Available = false;
 
 // Constants cho giao tiếp Serial2
 byte start_byte_1 = 0x3C;
 byte start_byte_2 = 0xC3;
 unsigned int value = 0;
 
-// Hàm đọc cảm biến HDC1000
+// SPS30 UART Implementation Functions
+void sensirion_uart_init()
+{
+    sps30Serial.begin(115200);
+}
+
+int16_t sensirion_uart_tx(uint16_t data_len, const uint8_t *data)
+{
+    return sps30Serial.write(data, data_len);
+}
+
+int16_t sensirion_uart_rx(uint16_t max_data_len, uint8_t *data)
+{
+    int16_t i = 0;
+    unsigned long start = millis();
+    while (i < max_data_len && (millis() - start) < 100)
+    { // timeout 100ms
+        if (sps30Serial.available())
+        {
+            data[i++] = sps30Serial.read();
+        }
+    }
+    return i;
+}
+
+void sensirion_sleep_usec(uint32_t useconds)
+{
+    if (useconds >= 1000)
+    {
+        delay(useconds / 1000);
+    }
+    else
+    {
+        delayMicroseconds(useconds);
+    }
+}
+
+// Hàm đọc cảm biến HDC1000 (tối ưu)
 double readSensor(double *temperature)
 {
     uint8_t Byte[4];
@@ -64,7 +132,7 @@ double readSensor(double *temperature)
     return -1; // Lỗi đọc
 }
 
-// Hàm đọc dữ liệu HDC1000
+// Hàm đọc dữ liệu HDC1000 (tối ưu)
 bool getHDC1000Data(HDC1000Data *data)
 {
     double temperature;
@@ -75,8 +143,7 @@ bool getHDC1000Data(HDC1000Data *data)
     // Kiểm tra dữ liệu hợp lệ
     if (humidity < 0 || temperature < -40 || temperature > 125 || humidity > 100)
     {
-        Serial.println("Loi doc du lieu HDC1000!");
-        return false;
+        return false; // Không in lỗi để giảm Serial output
     }
 
     data->temperature = temperature;
@@ -84,6 +151,50 @@ bool getHDC1000Data(HDC1000Data *data)
     data->dataValid = true;
 
     return true;
+}
+
+// Hàm đọc dữ liệu SPS30 (tối ưu với error handling)
+bool getSPS30Data(SPS30Data *data)
+{
+    if (!sps30Available)
+    {
+        Serial.println("Debug: SPS30 khong available!");
+        data->dataValid = false;
+        return false;
+    }
+
+    Serial.println("Debug: Bat dau doc SPS30...");
+    struct sps30_measurement m;
+    int16_t ret = sps30_read_measurement(&m);
+    Serial.print("Debug: SPS30 read result = ");
+    Serial.println(ret);
+
+    if (ret == 0)
+    {
+        // Kiểm tra dữ liệu hợp lệ trước khi sao chép
+        if (m.mc_1p0 >= 0 && m.mc_2p5 >= 0 && m.mc_4p0 >= 0 && m.mc_10p0 >= 0)
+        {
+            data->pm1_0 = m.mc_1p0;
+            data->pm2_5 = m.mc_2p5;
+            data->pm4_0 = m.mc_4p0;
+            data->pm10_0 = m.mc_10p0;
+            data->nc0_5 = m.nc_0p5;
+            data->nc1_0 = m.nc_1p0;
+            data->nc2_5 = m.nc_2p5;
+            data->nc4_0 = m.nc_4p0;
+            data->nc10_0 = m.nc_10p0;
+            data->typical_size = m.typical_particle_size;
+            data->dataValid = true;
+            return true;
+        }
+    }
+
+    // In lỗi để debug
+    Serial.print("SPS30 read failed! Error: ");
+    Serial.println(ret);
+
+    data->dataValid = false;
+    return false;
 }
 
 // Gửi dữ liệu qua RS485 với định dạng chuẩn
@@ -121,10 +232,10 @@ void task1Function()
 
         // Cập nhật dữ liệu chia sẻ
         noInterrupts();
-        sharedSensorData.temperature = sensorData.temperature;
-        sharedSensorData.humidity = sensorData.humidity;
-        sharedSensorData.dataValid = sensorData.dataValid;
-        newDataAvailable = true;
+        sharedHDCData.temperature = sensorData.temperature;
+        sharedHDCData.humidity = sensorData.humidity;
+        sharedHDCData.dataValid = sensorData.dataValid;
+        newHDCDataAvailable = true;
         interrupts();
     }
     else
@@ -133,31 +244,90 @@ void task1Function()
     }
 }
 
-// Nhiệm vụ 2: hiển thị dữ liệu
+// Nhiệm vụ 2: đọc cảm biến SPS30 và gửi Serial2
 void task2Function()
 {
-    if (newDataAvailable)
+    if (!sps30Available)
+        return; // Skip nếu SPS30 không có
+
+    SPS30Data sensorData;
+
+    if (getSPS30Data(&sensorData))
+    {
+        // Tạo chuỗi dữ liệu SPS30 (tối ưu string concatenation)
+        String dataString = "PM1:" + String(sensorData.pm1_0, 1) +
+                            ",PM2.5:" + String(sensorData.pm2_5, 1) +
+                            ",PM4:" + String(sensorData.pm4_0, 1) +
+                            ",PM10:" + String(sensorData.pm10_0, 1);
+
+        sendRS485Data(dataString);
+
+        // Cập nhật dữ liệu chia sẻ
+        noInterrupts();
+        sharedSPS30Data.pm1_0 = sensorData.pm1_0;
+        sharedSPS30Data.pm2_5 = sensorData.pm2_5;
+        sharedSPS30Data.pm4_0 = sensorData.pm4_0;
+        sharedSPS30Data.pm10_0 = sensorData.pm10_0;
+        sharedSPS30Data.dataValid = sensorData.dataValid;
+        newSPS30DataAvailable = true;
+        interrupts();
+    }
+}
+
+// Nhiệm vụ 3: hiển thị dữ liệu tổng hợp (tối ưu)
+void task3Function()
+{
+    bool hasData = false;
+
+    // Hiển thị HDC1000 nếu có dữ liệu mới
+    if (newHDCDataAvailable)
     {
         HDC1000Data localData;
         noInterrupts();
-        localData.temperature = sharedSensorData.temperature;
-        localData.humidity = sharedSensorData.humidity;
-        localData.dataValid = sharedSensorData.dataValid;
-        newDataAvailable = false;
+        localData.temperature = sharedHDCData.temperature;
+        localData.humidity = sharedHDCData.humidity;
+        localData.dataValid = sharedHDCData.dataValid;
+        newHDCDataAvailable = false;
         interrupts();
 
         if (localData.dataValid)
         {
-            Serial.println("=== Du lieu cam bien HDC1000 ===");
-            Serial.print("Nhiet do: ");
-            Serial.print(localData.temperature);
-            Serial.println(" °C");
-            Serial.print("Do am: ");
-            Serial.print(localData.humidity);
-            Serial.println(" %");
-            Serial.println("================================");
+            Serial.print("HDC: ");
+            Serial.print(localData.temperature, 1);
+            Serial.print("°C, ");
+            Serial.print(localData.humidity, 1);
+            Serial.print("%");
+            hasData = true;
         }
     }
+
+    // Hiển thị SPS30 nếu có dữ liệu mới
+    if (newSPS30DataAvailable && sps30Available)
+    {
+        SPS30Data localData;
+        noInterrupts();
+        localData.pm1_0 = sharedSPS30Data.pm1_0;
+        localData.pm2_5 = sharedSPS30Data.pm2_5;
+        localData.pm4_0 = sharedSPS30Data.pm4_0;
+        localData.pm10_0 = sharedSPS30Data.pm10_0;
+        localData.dataValid = sharedSPS30Data.dataValid;
+        newSPS30DataAvailable = false;
+        interrupts();
+
+        if (localData.dataValid)
+        {
+            if (hasData)
+                Serial.print(" | ");
+            Serial.print("SPS30: PM2.5=");
+            Serial.print(localData.pm2_5, 1);
+            Serial.print(", PM10=");
+            Serial.print(localData.pm10_0, 1);
+            hasData = true;
+        }
+    }
+
+    if (hasData)
+        Serial.println();
 }
 
 void setup()
@@ -186,15 +356,65 @@ void setup()
     delay(20);
 
     Serial.println("HDC1000 khoi tao thanh cong!");
-    Serial.println("ATmega328P gui du lieu HDC1000 qua RS485");
+
+    // Khởi tạo SPS30 UART
+    Serial.println("Starting SPS30...");
+    sensirion_uart_init();
+
+    int16_t ret = sps30_probe();
+    if (ret != 0)
+    {
+        Serial.print("SPS30 not found! Error: ");
+        Serial.println(ret);
+        Serial.println("Tiep tuc voi HDC1000...");
+        sps30Available = false;
+    }
+    else
+    {
+        Serial.println("SPS30 ready!");
+        sps30Available = true;
+
+        // Cấu hình auto cleaning
+        ret = sps30_set_fan_auto_cleaning_interval_days(1);
+        if (ret)
+        {
+            Serial.print("Set fan auto cleaning interval failed! Error: ");
+            Serial.println(ret);
+        }
+
+        // Bắt đầu đo SPS30
+        ret = sps30_start_measurement();
+        if (ret != 0)
+        {
+            Serial.print("Start measurement failed! Error: ");
+            Serial.println(ret);
+            sps30Available = false;
+        }
+        else
+        {
+            Serial.println("SPS30 measurement started!");
+        }
+    }
+
+    Serial.println("ATmega328P gui du lieu HDC1000 + SPS30 qua Serial2");
     Serial.println("HDC1000 I2C: SDA=A4, SCL=A5");
-    Serial.println("RS485: RX=14, TX=15, RE_DE=12");
+    Serial.println("SPS30 UART: Sensirion protocol");
 
     delay(1000);
 }
 
 void loop()
 {
+    double temperature;
+    double humidity;
+    humidity = readSensor(&temperature);
+
+    Serial.print("Temperature: ");
+    Serial.print(temperature, 2);
+    Serial.print(" °C, Humidity: ");
+    Serial.print(humidity, 2);
+    Serial.println(" %");
+
     int c;
     unsigned long currentMillis = millis();
 
@@ -244,11 +464,18 @@ void loop()
         task1Function();
     }
 
-    // Kiểm tra nếu đến thời gian thực hiện task2 (hiển thị dữ liệu)
+    // Kiểm tra nếu đến thời gian thực hiện task2 (hiển thị dữ liệu HDC1000)
     if (currentMillis - previousTask2Millis >= task2Interval)
     {
         previousTask2Millis = currentMillis;
         task2Function();
+    }
+
+    // Kiểm tra nếu đến thời gian thực hiện task3 (hiển thị dữ liệu)
+    if (currentMillis - previousTask3Millis >= task3Interval)
+    {
+        previousTask3Millis = currentMillis;
+        task3Function();
     }
 
     delay(2);

@@ -6,8 +6,8 @@
 #include "sps30.h"
 
 // Chân UART cho SPS30
-#define SPS30_RX 8
-#define SPS30_TX 9
+#define SPS30_RX 30
+#define SPS30_TX 31
 
 // Tạo SoftwareSerial cho SPS30
 SoftwareSerial sps30Serial(SPS30_RX, SPS30_TX); // RX, TX

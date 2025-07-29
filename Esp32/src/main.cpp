@@ -1,3 +1,38 @@
+// Cấu trúc dữ liệu SPS30
+struct SPS30Data
+{
+    float pm1_0;
+    float pm2_5;
+    float pm4_0;
+    float pm10;
+    bool dataValid;
+};
+
+// Hàm parse dữ liệu SPS30 từ chuỗi
+SPS30Data parseSPS30Data(String data)
+{
+    SPS30Data spsData;
+    spsData.dataValid = false;
+    // Format: TYPE:SPS30,PM1.0:12.34,PM2.5:56.78,PM4.0:90.12,PM10:34.56
+    if (data.indexOf("TYPE:SPS30") < 0)
+        return spsData;
+    int pm1Index = data.indexOf("PM1.0:");
+    int pm25Index = data.indexOf("PM2.5:");
+    int pm4Index = data.indexOf("PM4.0:");
+    int pm10Index = data.indexOf("PM10:");
+    if (pm1Index < 0 || pm25Index < 0 || pm4Index < 0 || pm10Index < 0)
+        return spsData;
+    String pm1Str = data.substring(pm1Index + 6, data.indexOf(",", pm1Index));
+    String pm25Str = data.substring(pm25Index + 6, data.indexOf(",", pm25Index));
+    String pm4Str = data.substring(pm4Index + 6, data.indexOf(",", pm4Index));
+    String pm10Str = data.substring(pm10Index + 5);
+    spsData.pm1_0 = pm1Str.toFloat();
+    spsData.pm2_5 = pm25Str.toFloat();
+    spsData.pm4_0 = pm4Str.toFloat();
+    spsData.pm10 = pm10Str.toFloat();
+    spsData.dataValid = true;
+    return spsData;
+}
 #include <WiFi.h>
 #include <HardwareSerial.h>
 #include <freertos/FreeRTOS.h>
@@ -157,30 +192,25 @@ void processRS485Command()
         String newData = RS485Serial.readString();
         rs485Buffer += newData;
 
-        // Tìm kiếm gói dữ liệu HDC1080 hoàn chỉnh với header và footer
-        int startIndex = rs485Buffer.indexOf("<HDC1080>");
-        int endIndex = rs485Buffer.indexOf("</HDC1080>");
+        // Nhận và xử lý gói dữ liệu HDC1080 hoặc SPS30
+        int startIndexHDC = rs485Buffer.indexOf("<HDC1080>");
+        int endIndexHDC = rs485Buffer.indexOf("</HDC1080>");
+        int startIndexSPS = rs485Buffer.indexOf("<SPS30>");
+        int endIndexSPS = rs485Buffer.indexOf("</SPS30>");
 
-        if (startIndex >= 0 && endIndex >= 0 && endIndex > startIndex)
+        // Ưu tiên xử lý gói HDC1080 trước nếu có
+        if (startIndexHDC >= 0 && endIndexHDC >= 0 && endIndexHDC > startIndexHDC)
         {
-            // Trích xuất dữ liệu giữa header và footer
-            String receivedData = rs485Buffer.substring(startIndex + 9, endIndex);
-            receivedData.trim(); // Loại bỏ ký tự xuống dòng và khoảng trắng
-
-            Serial.print("Nhan du lieu RS485: ");
+            String receivedData = rs485Buffer.substring(startIndexHDC + 9, endIndexHDC);
+            receivedData.trim();
+            Serial.print("Nhan du lieu RS485 HDC1080: ");
             Serial.println(receivedData);
-
-            // Xóa dữ liệu đã xử lý khỏi buffer
-            rs485Buffer = rs485Buffer.substring(endIndex + 10);
-
-            // Parse dữ liệu cảm biến HDC1080
+            rs485Buffer = rs485Buffer.substring(endIndexHDC + 10);
             if (receivedData.length() > 0)
             {
                 SensorData sensorData = parseSensorData(receivedData);
-
                 if (sensorData.dataValid)
                 {
-                    // Gửi dữ liệu HDC1080 vào queue
                     if (xQueueSend(sensorQueue, &sensorData, pdMS_TO_TICKS(100)) == pdTRUE)
                     {
                         Serial.print("HDC1080 - Nhiet do: ");
@@ -189,8 +219,6 @@ void processRS485Command()
                         Serial.print(sensorData.humidity);
                         Serial.println(" %");
                         Serial.println("Du lieu HDC1080 da gui vao queue thanh cong");
-
-                        // Giữ MOSFET bật trong 3 giây sau khi xử lý thành công
                         delay(3000);
                         digitalWrite(MOSFET_PIN, LOW);
                         digitalWrite(LED_BUILTIN, LOW);
@@ -199,7 +227,6 @@ void processRS485Command()
                     else
                     {
                         Serial.println("Khong the gui du lieu HDC1080 vao queue!");
-                        // Tắt MOSFET nếu lỗi
                         digitalWrite(MOSFET_PIN, LOW);
                         digitalWrite(LED_BUILTIN, LOW);
                     }
@@ -207,7 +234,40 @@ void processRS485Command()
                 else
                 {
                     Serial.println("Du lieu HDC1080 khong hop le!");
-                    // Tắt MOSFET nếu dữ liệu không hợp lệ
+                    digitalWrite(MOSFET_PIN, LOW);
+                    digitalWrite(LED_BUILTIN, LOW);
+                }
+            }
+        }
+        else if (startIndexSPS >= 0 && endIndexSPS >= 0 && endIndexSPS > startIndexSPS)
+        {
+            String receivedData = rs485Buffer.substring(startIndexSPS + 8, endIndexSPS);
+            receivedData.trim();
+            Serial.print("Nhan du lieu RS485 SPS30: ");
+            Serial.println(receivedData);
+            rs485Buffer = rs485Buffer.substring(endIndexSPS + 9);
+            if (receivedData.length() > 0)
+            {
+                SPS30Data spsData = parseSPS30Data(receivedData);
+                if (spsData.dataValid)
+                {
+                    Serial.print("SPS30 - PM1.0: ");
+                    Serial.print(spsData.pm1_0);
+                    Serial.print(" | PM2.5: ");
+                    Serial.print(spsData.pm2_5);
+                    Serial.print(" | PM4.0: ");
+                    Serial.print(spsData.pm4_0);
+                    Serial.print(" | PM10: ");
+                    Serial.println(spsData.pm10);
+                    // TODO: Đưa vào queue hoặc xử lý tiếp nếu cần
+                    delay(3000);
+                    digitalWrite(MOSFET_PIN, LOW);
+                    digitalWrite(LED_BUILTIN, LOW);
+                    Serial.println("MOSFET OFF - Processing completed");
+                }
+                else
+                {
+                    Serial.println("Du lieu SPS30 khong hop le!");
                     digitalWrite(MOSFET_PIN, LOW);
                     digitalWrite(LED_BUILTIN, LOW);
                 }

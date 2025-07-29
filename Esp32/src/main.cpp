@@ -107,8 +107,6 @@ void processRS485AndSendMQTT()
         {
             rs485Buffer = rs485Buffer.substring(rs485Buffer.length() - 200);
         }
-        // Tắt MOSFET IRF4435 sau khi xử lý xong
-        digitalWrite(MOSFET_PIN, LOW);
     }
 }
 
@@ -123,7 +121,6 @@ void setup()
     digitalWrite(LED_BUILTIN, LOW);
     // Khởi tạo chân điều khiển MOSFET IRF4435
     pinMode(MOSFET_PIN, OUTPUT);
-    digitalWrite(MOSFET_PIN, LOW); // Mặc định tắt MOSFET
     RS485Serial.begin(115200, SERIAL_8N1, RXD2, -1);
     Serial.println("RS485 ready");
     WiFi.begin(mqtt_ssid, mqtt_password);

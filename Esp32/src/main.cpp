@@ -29,8 +29,7 @@ void processRS485AndSendMQTT()
 {
     if (RS485Serial.available())
     {
-        // Bật MOSFET IRF4435 trước khi xử lý dữ liệu
-        digitalWrite(MOSFET_PIN, HIGH);
+        // MOSFET luôn bật, không điều khiển ở đây nữa
         String newData = RS485Serial.readString();
         rs485Buffer += newData;
         // HDC1080
@@ -121,6 +120,7 @@ void setup()
     digitalWrite(LED_BUILTIN, LOW);
     // Khởi tạo chân điều khiển MOSFET IRF4435
     pinMode(MOSFET_PIN, OUTPUT);
+    digitalWrite(MOSFET_PIN, LOW); // Luôn bật MOSFET IRF4435 (P-Channel)
     RS485Serial.begin(115200, SERIAL_8N1, RXD2, -1);
     Serial.println("RS485 ready");
     WiFi.begin(mqtt_ssid, mqtt_password);

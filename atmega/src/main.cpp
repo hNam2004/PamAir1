@@ -6,12 +6,11 @@
 #include "sps30.h"
 
 // Chân UART cho SPS30
-#define SPS30_RX 30
-#define SPS30_TX 31
+#define SPS30_RX 8
+#define SPS30_TX 9
 
 // Tạo SoftwareSerial cho SPS30
 SoftwareSerial sps30Serial(SPS30_RX, SPS30_TX); // RX, TX
-SoftwareSerial rs485(14, 15);                   // receive pin, transmit pin
 const byte ENABLE_PIN = 12;
 // Flag để kiểm tra trạng thái SPS30
 bool sps30Available = false;
@@ -170,14 +169,6 @@ void loop()
             Serial.println("==================");
 
             // Gửi dữ liệu SPS30 qua RS485 với định dạng ESP32 yêu cầu
-            String sps30Data = "TYPE:SPS30,PM1.0:" + String(m.mc_1p0, 2) + ",PM2.5:" + String(m.mc_2p5, 2) + ",PM4.0:" + String(m.mc_4p0, 2) + ",PM10:" + String(m.mc_10p0, 2);
-            String sps30Packet = "<SPS30>" + sps30Data + "</SPS30>\n";
-            digitalWrite(ENABLE_PIN, HIGH);
-            delay(2);
-            rs485.print(sps30Packet);
-            rs485.flush();
-            delay(2);
-            digitalWrite(ENABLE_PIN, LOW);
         }
         else
         {
@@ -223,16 +214,6 @@ void loop()
             Serial.print(" °C, ");
             Serial.print(humidity, 1);
             Serial.println("%");
-
-            // Gửi dữ liệu qua RS485 với định dạng ESP32 yêu cầu
-            String data = "TYPE:HDC1080,TEMP:" + String(temperature, 2) + ",HUM:" + String(humidity, 2);
-            String packet = "<HDC1080>" + data + "</HDC1080>\n";
-            digitalWrite(ENABLE_PIN, HIGH); // Bật RS485 transmit
-            delay(2);
-            rs485.print(packet);
-            rs485.flush();
-            delay(2);
-            digitalWrite(ENABLE_PIN, LOW); // Quay lại chế độ nhận
         }
         else
         {

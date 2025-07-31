@@ -17,7 +17,6 @@ const char *mqtt_topic = "esp32/test11";
 #define TXD2 35       // MAX485 DI ← ESP32 TX (GPIO35)
 #define RE_DE 13      // MAX485 RE/DE ← ESP32 (GPIO4)
 #define MOSFET_PIN 23 // GPIO23 dùng để điều khiển IRF4435
-// TX_PIN đã xóa vì chỉ nhận dữ liệu
 
 HardwareSerial RS485Serial(2);
 
@@ -30,7 +29,7 @@ void processRS485AndSendMQTT()
     if (RS485Serial.available())
     {
         // MOSFET luôn bật, không điều khiển ở đây nữa
-        String newData = RS485Serial.readString();
+        String newData = RS485Serial.readStringUntil('\n'); // Sửa thành readStringUntil('\n')
         rs485Buffer += newData;
         // HDC1080
         int startIndexHDC = rs485Buffer.indexOf("<HDC1080>");
@@ -59,10 +58,17 @@ void processRS485AndSendMQTT()
                 jsonString += "}";
                 char jsonBuffer[256];
                 jsonString.toCharArray(jsonBuffer, sizeof(jsonBuffer));
-                if (!client.connected())
-                    client.connect("ESP32Client");
-                client.loop();
-                client.publish(mqtt_topic, jsonBuffer);
+                if (!client.connected()) {
+                    if (client.connect("ESP32Client")) {
+                        Serial.println("Reconnected to MQTT");
+                    } else {
+                        Serial.println("MQTT connection failed");
+                    }
+                }
+                if (client.connected()) {
+                    client.loop();
+                    client.publish(mqtt_topic, jsonBuffer);
+                }
             }
         }
         // SPS30
@@ -95,10 +101,17 @@ void processRS485AndSendMQTT()
                 jsonString += "}";
                 char jsonBuffer[256];
                 jsonString.toCharArray(jsonBuffer, sizeof(jsonBuffer));
-                if (!client.connected())
-                    client.connect("ESP32Client");
-                client.loop();
-                client.publish(mqtt_topic, jsonBuffer);
+                if (!client.connected()) {
+                    if (client.connect("ESP32Client")) {
+                        Serial.println("Reconnected to MQTT");
+                    } else {
+                        Serial.println("MQTT connection failed");
+                    }
+                }
+                if (client.connected()) {
+                    client.loop();
+                    client.publish(mqtt_topic, jsonBuffer);
+                }
             }
         }
         // Giới hạn kích thước buffer để tránh tràn bộ nhớ
@@ -134,8 +147,23 @@ void setup()
     Serial.println("MQTT ready");
 }
 
-void loop()
-{
+// Thêm logic kiểm soát nguồn IRF4435
+unsigned long lastActivityTime = 0;
+const unsigned long inactivityTimeout = 10000; // 10 giây không hoạt động thì tắt nguồn
+
+void checkIRF4435Power() {
+    if (RS485Serial.available()) {
+        lastActivityTime = millis(); // Cập nhật thời gian hoạt động khi có dữ liệu
+        digitalWrite(MOSFET_PIN, LOW); // Bật MOSFET nếu có hoạt động
+    }
+    // Tắt MOSFET nếu không có hoạt động trong 10 giây
+    if (millis() - lastActivityTime > inactivityTimeout && digitalRead(MOSFET_PIN) == LOW) {
+        digitalWrite(MOSFET_PIN, HIGH); // Tắt MOSFET
+    }
+}
+
+void loop() {
     processRS485AndSendMQTT();
+    checkIRF4435Power();
     delay(100);
 }

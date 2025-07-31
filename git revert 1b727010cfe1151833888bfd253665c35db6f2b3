@@ -1,0 +1,278 @@
+[33mcommit 31cd1e645539eefe9bab81a37365fa8ccf873b69[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Merge: 91e7936 ddcf0b9
+Author: hoangpd2004 <hoangphan121314151617@gmail.com>
+Date:   Thu Jul 31 15:37:38 2025 +0700
+
+    Merge pull request #18 from hNam2004/Hoang
+    
+    sua file mainsps30
+
+[33mcommit ddcf0b9e9b714b9c6a554f25ba95b9555006275a[m[33m ([m[1;31morigin/Hoang[m[33m)[m
+Author: hoangpd2004 <hoangphan121314151617@gmail.com>
+Date:   Thu Jul 31 15:36:27 2025 +0700
+
+    sua file mainsps30
+
+[33mcommit 91e79360318a108fd3988d484765854728c81f85[m
+Merge: b51f6f2 7c2cc23
+Author: hNam2004 <138799175+hNam2004@users.noreply.github.com>
+Date:   Tue Jul 29 14:39:41 2025 +0700
+
+    Merge pull request #16 from hNam2004/Nam
+    
+    sua lai auto bat
+
+[33mcommit 7c2cc2331a455b78c09823c4198d72a4bef36fdb[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Tue Jul 29 14:38:50 2025 +0700
+
+    sua lai auto bat
+
+[33mcommit b51f6f2b1bb6f6ecff064ac8e3a927186574fd8f[m
+Merge: a44580b 0caee54
+Author: hNam2004 <138799175+hNam2004@users.noreply.github.com>
+Date:   Tue Jul 29 14:31:49 2025 +0700
+
+    Merge pull request #15 from hNam2004/Nam
+    
+    disable tắt irf
+
+[33mcommit 0caee54ca6e25ad9a3d95d1b232da2a535aed50e[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Tue Jul 29 14:29:49 2025 +0700
+
+    disable tắt irf
+
+[33mcommit a44580b3c9023445cd855014d1502dee69bfe834[m
+Merge: bc2f5f8 8261742
+Author: hNam2004 <138799175+hNam2004@users.noreply.github.com>
+Date:   Tue Jul 29 14:24:01 2025 +0700
+
+    Merge pull request #14 from hNam2004/Nam
+    
+    up lai rs485 irf4435
+
+[33mcommit 8261742993d56a6e303fd783d9a0f8d23b7359cc[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Tue Jul 29 14:23:23 2025 +0700
+
+    up lai rs485 irf4435
+
+[33mcommit bc2f5f8e632cf7ab556aea414d13acd76496c0a4[m
+Merge: b058afb 3ec7b88
+Author: hNam2004 <138799175+hNam2004@users.noreply.github.com>
+Date:   Tue Jul 29 11:13:03 2025 +0700
+
+    Merge pull request #13 from hNam2004/Nam
+    
+    Nam
+
+[33mcommit 3ec7b8847e1c60512665dd95810fdd90f457340f[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Tue Jul 29 11:12:20 2025 +0700
+
+    sua board, rx tx
+
+[33mcommit ba544f5e10ed7a0313477877604bd89eae5d8e6b[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Tue Jul 29 09:33:02 2025 +0700
+
+    update rs485
+
+[33mcommit b058afbd631bd8806b47ed78fffe2ae4a2431639[m
+Merge: 458a533 1b72701
+Author: hNam2004 <138799175+hNam2004@users.noreply.github.com>
+Date:   Mon Jul 28 16:44:24 2025 +0700
+
+    Merge pull request #12 from hNam2004/Nam
+    
+    Nam
+
+[33mcommit 1b727010cfe1151833888bfd253665c35db6f2b3[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Mon Jul 28 16:18:55 2025 +0700
+
+    update final sps30 (gio chi can them max485 va thay env)
+
+[33mcommit 458a5333fbd9a9332223f4af9028eb03e15740bf[m[33m ([m[1;31morigin/sps30_i2c[m[33m)[m
+Author: hNam2004 <namzzabc1235@gmail.com>
+Date:   Sun Jul 27 17:33:55 2025 +0700
+
+    xoa file thua di
+
+[33mcommit c2ce23e0f1d03b2beece8bc8fc312180046222c0[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Sun Jul 27 17:30:02 2025 +0700
+
+    xoa file thua
+
+[33mcommit a60f206b5c21efe63146a9f35700426fa910e4bf[m
+Merge: f6eaeba 80aa7dc
+Author: hNam2004 <138799175+hNam2004@users.noreply.github.com>
+Date:   Sun Jul 27 17:28:57 2025 +0700
+
+    Merge pull request #11 from hNam2004/Nam
+    
+    sua atmega them sps30
+
+[33mcommit 80aa7dcb9e4e6be7b3ac7b6793eb898dee60c51e[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Sun Jul 27 17:27:55 2025 +0700
+
+    sua atmega them sps30
+
+[33mcommit f6eaeba791a4ee1d20494c1873f8ea2a52431216[m
+Merge: fe0ee9e 41da7aa
+Author: hNam2004 <138799175+hNam2004@users.noreply.github.com>
+Date:   Fri Jul 18 09:37:53 2025 +0700
+
+    Merge pull request #9 from hNam2004/Nam
+    
+    update lai ket noi IRF
+
+[33mcommit 41da7aa4a2a203f8cc1490c6570aee63708785bb[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Fri Jul 18 09:35:49 2025 +0700
+
+    update lai ket noi IRF
+
+[33mcommit fe0ee9e0315e065cf01e06c3ee8a1c3729cf1e20[m
+Merge: 07aefdd 5ae9438
+Author: hNam2004 <138799175+hNam2004@users.noreply.github.com>
+Date:   Tue Jul 15 16:03:33 2025 +0700
+
+    Merge pull request #8 from hNam2004/Nam
+    
+    up lai rs485
+
+[33mcommit 5ae9438c2e2948c78098396608b0607ce2a138a3[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Tue Jul 15 16:02:58 2025 +0700
+
+    up lai rs485
+
+[33mcommit 07aefdd11c7470584dd03a536ead3f9dda01fcf2[m
+Merge: 9d3cabd 56653f9
+Author: hNam2004 <138799175+hNam2004@users.noreply.github.com>
+Date:   Tue Jul 15 10:50:58 2025 +0700
+
+    Merge pull request #6 from hNam2004/Nam
+    
+    update atmega
+
+[33mcommit 56653f926f38819b97278f49acaf5a299fe36321[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Tue Jul 15 10:50:04 2025 +0700
+
+    update atmega
+
+[33mcommit 9d3cabd20e1710b06233a378a2a048e667ea3b8b[m
+Merge: 450d901 e178439
+Author: hNam2004 <138799175+hNam2004@users.noreply.github.com>
+Date:   Sun Jul 13 11:25:58 2025 +0700
+
+    Merge pull request #5 from hNam2004/Nam
+    
+    update atmega va esp32 them chan doc du lieu
+
+[33mcommit e1784395bc82a7910e055156d5cba63ea45b0640[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Sun Jul 13 11:25:12 2025 +0700
+
+    update atmega va esp32 them chan doc du lieu
+
+[33mcommit 450d9019e8131f225a5a6ab2ca19ff296d63118e[m
+Merge: 58ec0aa 3f319bb
+Author: hNam2004 <138799175+hNam2004@users.noreply.github.com>
+Date:   Fri Jul 11 10:32:47 2025 +0700
+
+    Merge pull request #4 from hNam2004/Nam
+    
+    Nam
+
+[33mcommit 3f319bbb4316c822acb2f7465ca54a6a9df14615[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Fri Jul 11 10:31:21 2025 +0700
+
+    update SPS cho mach sensor
+
+[33mcommit a2cc41a50fc705c246be3fc1b0197a25cd55a26c[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Fri Jul 11 10:30:20 2025 +0700
+
+     update SDS cho mach sensor
+
+[33mcommit 58ec0aae8d4d544ea98011e9e3118e6d80582169[m
+Merge: e453f34 85f2c7f
+Author: hNam2004 <138799175+hNam2004@users.noreply.github.com>
+Date:   Thu Jul 10 14:28:00 2025 +0700
+
+    Merge pull request #3 from hNam2004/Nam
+    
+    Nam
+
+[33mcommit 85f2c7f11bea2e2d9b788ee7a4c14b4dce97a613[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Thu Jul 10 14:23:13 2025 +0700
+
+    update main
+
+[33mcommit 3e5528cd48200ffa7f924787f88177e1678a4c3e[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Thu Jul 10 14:21:15 2025 +0700
+
+    update main
+
+[33mcommit c2732b1299e4e1370a36708f152eb17d20509f2a[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Thu Jul 10 13:47:19 2025 +0700
+
+    update atmega328p
+
+[33mcommit a4456a15f823c891a788d0073e22046348ac3a23[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Thu Jul 10 11:40:56 2025 +0700
+
+    update amtega328p
+
+[33mcommit eeb5b224cec5c767a06acd2ac2559690d6402ad1[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Thu Jul 10 11:20:12 2025 +0700
+
+    update chan ket noi
+
+[33mcommit e453f347800441e4005d9afc9a76fa471f05730f[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Thu Jul 10 10:57:36 2025 +0700
+
+    update GPS va atmega328p, them read hdc1080
+
+[33mcommit 1f41784104608e0ace8a4cae4d0ecd30703e1c35[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Thu Jul 10 08:49:35 2025 +0700
+
+    update main
+
+[33mcommit 00009f17a4954b3dc71d66a41abeb2090d2c0044[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Wed Jul 9 16:06:12 2025 +0700
+
+    update hdc
+
+[33mcommit a592277995f38b75f42828feb82fad6de8e41c44[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Tue Jul 8 14:17:01 2025 +0700
+
+    update main
+
+[33mcommit 3e36b3f8d6f0b4c4ccfc0aea96ea6c5fa1bf06da[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Tue Jul 8 13:53:39 2025 +0700
+
+    main
+
+[33mcommit 17c68db9cbcd392b9e4baf1f9ba5141a18d0cbb2[m
+Author: HoangDuc1234 <namzzabc1235@gmail.com>
+Date:   Tue Jul 8 13:48:10 2025 +0700
+
+    first commit

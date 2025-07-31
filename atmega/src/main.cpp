@@ -6,8 +6,8 @@
 #include "sps30.h"
 
 // Chân UART cho SPS30
-#define SPS30_RX 8
-#define SPS30_TX 9
+#define SPS30_RX 16
+#define SPS30_TX 17
 
 // Tạo SoftwareSerial cho SPS30
 SoftwareSerial sps30Serial(SPS30_RX, SPS30_TX); // RX, TX
@@ -85,6 +85,9 @@ bool getHDC1000Data(double *temperature, double *humidity)
 
 void setup()
 {
+    int16_t ret;
+    uint8_t auto_clean_days = 4;
+    uint32_t auto_clean;
     Serial.begin(115200);
     Wire.begin();          // Khởi tạo I2C cho HDC1000
     sensirion_uart_init(); // Khởi tạo UART cho SPS30
@@ -100,7 +103,7 @@ void setup()
 
     // Khởi tạo SPS30
     Serial.println("Starting SPS30...");
-    int16_t ret = sps30_probe();
+    ret = sps30_probe();
     if (ret != 0)
     {
         Serial.print("SPS30 not found! Error: ");
@@ -167,8 +170,6 @@ void loop()
             Serial.print(m.mc_10p0);
             Serial.println(" μg/m³");
             Serial.println("==================");
-
-            // Gửi dữ liệu SPS30 qua RS485 với định dạng ESP32 yêu cầu
         }
         else
         {

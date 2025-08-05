@@ -34,8 +34,8 @@
 #include <SoftwareSerial.h>
 #include <Arduino.h>
 
-#define SPS30_RX 8
-#define SPS30_TX 9
+#define SPS30_RX 16
+#define SPS30_TX 17
 #define BAUDRATE 115200
 
 SoftwareSerial sps30Serial(SPS30_RX, SPS30_TX);

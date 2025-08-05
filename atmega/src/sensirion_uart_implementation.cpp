@@ -29,14 +29,24 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SENSIRION_UART_H
-#define SENSIRION_UART_H
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "sensirion_arch_config.h"
+#include "sensirion_uart.h"
+#include <SoftwareSerial.h>
+#include <Arduino.h>
+
+#define SPS30_RX 8
+#define SPS30_TX 9
+#define BAUDRATE 115200
+
+SoftwareSerial sps30Serial(SPS30_RX, SPS30_TX);
+/*
+ * INSTRUCTIONS
+ * ============
+ *
+ * Implement all functions where they are marked with TODO: implement
+ * Follow the function specification in the comments.
+ */
+
 /**
  * sensirion_uart_select_port() - select the UART port index to use
  *                                THE IMPLEMENTATION IS OPTIONAL ON SINGLE-PORT
@@ -44,22 +54,35 @@ extern "C" {
  *
  * Return:      0 on success, an error code otherwise
  */
- int16_t sensirion_uart_select_port(uint8_t port);
+int16_t sensirion_uart_select_port(uint8_t port)
+{
+    return 0;
+}
 
 /**
  * sensirion_uart_open() - initialize UART
  *
  * Return:      0 on success, an error code otherwise
  */
- int16_t sensirion_uart_open();
-
+int16_t sensirion_uart_open()
+{
+    sps30Serial.begin(BAUDRATE);
+    while (!Serial)
+    {
+        delay(100);
+    }
+    return 0;
+}
 /**
  * sensirion_uart_close() - release UART resources
  *
  * Return:      0 on success, an error code otherwise
  */
- int16_t sensirion_uart_close();
-
+int16_t sensirion_uart_close()
+{
+    sps30Serial.end();
+    return 0;
+}
 /**
  * sensirion_uart_tx() - transmit data over UART
  *
@@ -67,7 +90,10 @@ extern "C" {
  * @data:       data to send
  * Return:      Number of bytes sent or a negative error code
  */
- int16_t sensirion_uart_tx(uint16_t data_len, const uint8_t* data);
+int16_t sensirion_uart_tx(uint16_t data_len, const uint8_t *data)
+{
+    return sps30Serial.write(data, data_len);
+}
 
 /**
  * sensirion_uart_rx() - receive data over UART
@@ -76,7 +102,19 @@ extern "C" {
  * @data:       Memory where received data is stored
  * Return:      Number of bytes received or a negative error code
  */
- int16_t sensirion_uart_rx(uint16_t max_data_len, uint8_t* data);
+int16_t sensirion_uart_rx(uint16_t max_data_len, uint8_t *data)
+{
+    int16_t i = 0;
+    unsigned long start = millis();
+    while (i < max_data_len && (millis() - start) < 100)
+    {
+        if (sps30Serial.available())
+        {
+            data[i++] = sps30Serial.read();
+        }
+    }
+    return i;
+}
 
 /**
  * Sleep for a given number of microseconds. The function should delay the
@@ -86,10 +124,7 @@ extern "C" {
  *
  * @param useconds the sleep time in microseconds
  */
- void sensirion_sleep_usec(uint32_t useconds);
-
-#ifdef __cplusplus
+void sensirion_sleep_usec(uint32_t useconds)
+{
+    delay((useconds / 1000) + 1);
 }
-#endif
-
-#endif /* SENSIRION_UART_H */

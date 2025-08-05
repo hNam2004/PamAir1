@@ -31,14 +31,9 @@
 
 #include "sensirion_arch_config.h"
 #include "sensirion_uart.h"
-#include <SoftwareSerial.h>
 #include <Arduino.h>
 
-#define SPS30_RX 16
-#define SPS30_TX 17
 #define BAUDRATE 115200
-
-SoftwareSerial sps30Serial(SPS30_RX, SPS30_TX);
 /*
  * INSTRUCTIONS
  * ============
@@ -66,7 +61,7 @@ int16_t sensirion_uart_select_port(uint8_t port)
  */
 int16_t sensirion_uart_open()
 {
-    sps30Serial.begin(BAUDRATE);
+    Serial.begin(BAUDRATE);
     while (!Serial)
     {
         delay(100);
@@ -80,7 +75,7 @@ int16_t sensirion_uart_open()
  */
 int16_t sensirion_uart_close()
 {
-    sps30Serial.end();
+    Serial.end();
     return 0;
 }
 /**
@@ -92,7 +87,7 @@ int16_t sensirion_uart_close()
  */
 int16_t sensirion_uart_tx(uint16_t data_len, const uint8_t *data)
 {
-    return sps30Serial.write(data, data_len);
+    return Serial.write(data, data_len);
 }
 
 /**
@@ -108,9 +103,9 @@ int16_t sensirion_uart_rx(uint16_t max_data_len, uint8_t *data)
     unsigned long start = millis();
     while (i < max_data_len && (millis() - start) < 100)
     {
-        if (sps30Serial.available())
+        if (Serial.available())
         {
-            data[i++] = sps30Serial.read();
+            data[i++] = Serial.read();
         }
     }
     return i;
